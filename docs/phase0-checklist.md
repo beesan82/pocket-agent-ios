@@ -30,11 +30,19 @@
 - [x] アプリ全体（Xcode）のビルドに PocketAgentRuntime を含めて成功 — run 39099104631（commit `8cbde12`）、Xcode 26.6 (17F113) / Swift 6.3.3。Core 8 + Runtime 9 + App 2 テスト合格
 
 ## 0-5 モデル経路 1 往復
-- [ ] ClaudeAdapter: 実 API キー（Keychain 入力）で 1 往復 — 実機
-- [ ] AppleLocalAdapter: `SystemLanguageModel` の availability 判定 + 1 往復 — Apple Intelligence 対応実機
-- [ ] 型付きツールを 1 件呼び出し
+設計: `docs/superpowers/specs/2026-10-18-phase0-5-model-adapters-design.md` / 計画: `docs/superpowers/plans/2026-10-18-phase0-5-model-adapters.md`
+
+- [x] Core: `ModelChoice` / `ModelUnavailableReason` / `CredentialStore` / `ModelBackendResolver`（Apple 選択時はキーを読まず Claude を生成しない・フォールバックしない）— CI run 39101123691 で 17/17 合格
+- [x] ClaudeAdapter（`AnthropicClient` を包まずに返す）+ `LLMErrorDescriber` — URLProtocol スタブ経由で `AgentRunner` 1 往復・`x-api-key` 送信・401 文言を確認（Runtime 16/16 合格、同 run）
+- [x] `KeychainCredentialStore`（Security）保存・上書き・削除 — シミュレータで合格（同 run。アドホック署名が必要だった: 無署名では -34018、run 39100885741）
+- [x] `AppleLocalAvailability`: `SystemLanguageModel.Availability` → 理由の写像 — シミュレータで合格（同 run）
+- [x] 設定画面（キー入力・保存・削除、モデル選択、Apple 不可時は選択不可＋理由表示）と 1 往復テスト画面 — **ビルドのみ確認。画面操作は未検証**
+- [ ] ClaudeAdapter: 実 API キー（Keychain 入力）で 1 往復 — **実機未検証**（TestFlight 未接続）
+- [ ] AppleLocalAdapter: 実機での availability 判定 + 1 往復 — **実機未検証**（Apple Intelligence 対応実機が必要）
+- [ ] 型付きツールを 1 件呼び出し（実モデル）— 未着手。Apple ローカルはツール承認の設計待ち（ADR-009）
 
 ## ゲート / ブロッカー
+- 実機検証の手順（TestFlight 接続後）: 設定でキー保存 → 1往復テスト（Claude）→ 設定で Appleローカル → 1往復テスト（機内モードでも応答すること、AT-02/AT-14）→ Claude に戻して再送信（AT-04）
 - Apple Developer Program 契約・Bundle ID・TestFlight（実機検証に必須）
 - Apple Intelligence 対応 iPhone の有無（要件15章で未確認）
 - Anthropic API キー（ユーザーが端末上で入力。チャットやリポジトリに貼らない）

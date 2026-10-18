@@ -43,6 +43,38 @@
 - 影響要件: FR-04, FR-05, FR-06, AT-05, AT-08, AT-09
 - 状態: 実装済み（CI 未実行）
 
+## ADR-008 SDK のクライアントは包まずに `AgentRunner` へ渡す
+- 決定: `ClaudeAdapter.makeClient` は `AnthropicClient` をそのまま返し、Apple は `FoundationModelsClient<EmptyContext>` をそのまま使う。選択の判断は Core の `ModelBackendResolver<Backend>`（AgentRunKit 非依存のジェネリック）に置く。
+- 理由（v6.1.0 ソースで確認）: `Agent` はテキストのみの応答で終了するかを `client is any ContentOnlyTerminatingClient`（package 可視）で判定する。`AnthropicClient` と `FoundationModelsClient` は準拠済みだが、独自ラッパーは準拠できず、テキスト応答でも終了せず反復上限まで回る。
+- 検証: `ClaudeAdapterTests.textReplyCompletesRunInOneRoundTrip`（URLProtocol スタブで実 `AnthropicClient` → `AgentRunner` が 1 回の HTTP で `.completed`）— CI run 39101123691 で合格。
+- 影響要件: FR-01, FR-02, AT-01, AT-04
+- 状態: 採用
+
+## ADR-009 Apple ローカルには当面ツールを渡さない
+- 決定: `FoundationModelsClient(tools:context:instructions:)` の `tools` は空で生成する。
+- 理由（v6.1.0 ソースで確認）: `FoundationModelsClient` は渡されたツールを `FMToolAdapter` 経由で FoundationModels のセッション内から直接 `execute` する。`Agent` の `approvalPolicy` / 承認ハンドラを通らないため、外部副作用ツール（LINE 共有）を渡すと承認なしで実行され得る（FR-05 違反）。
+- Phase 1 で Apple ローカルにツールを使わせる前に、ツール側で承認を待つラッパー等を設計し、FakeLLM 相当のテストを付ける。
+- 影響要件: FR-05, AT-05
+- 状態: 採用（暫定）
+
+## ADR-010 APIキーは Keychain generic password（ThisDeviceOnly）
+- 決定: `KeychainCredentialStore`（service `com.example.pocketagent.anthropic` / account `api-key`、`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`）。保存は Update→なければ Add。エラーは `OSStatus` だけを持つ `KeychainError`。
+- 理由: 要件 NFR「Keychain」。バックアップ・iCloud 同期に乗せない。エラー文言からキーが漏れない。
+- 画面はキーを再表示しない（「保存済み」のみ）。モデル選択・モデル ID は秘密ではないので UserDefaults（`pocketagent.modelChoice` / `pocketagent.claudeModel`）。
+- エラー表示は `LLMErrorDescriber` 経由のみ。AgentRunKit の `httpError` はレスポンス本文を含むため、`error` をそのまま画面やログに出さない。
+- 影響要件: AT-01, AT-11
+- 状態: 採用
+
+## ADR-011 Claude の既定モデル ID は `claude-sonnet-5-5`
+- 決定: 既定 `claude-sonnet-5-5`、`maxTokens` 1024。設定画面で変更可。
+- 理由: 1往復検証の費用と速度のバランス（筆者の判断。ユーザー未確認）。
+- 状態: 暫定
+
+## ADR-012 CI の単体テストはシミュレータ向けアドホック署名で実行
+- 決定: `xcodebuild test` のみ `CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=`（Sign to Run Locally）。`xcodebuild build` は無署名のまま。
+- 理由: 無署名（`CODE_SIGNING_ALLOWED=NO`）では Keychain が `errSecMissingEntitlement`(-34018) を返した（run 39100885741）。アドホック署名で合格（run 39101123691）。証明書・Team ID・シークレットは不要。
+- 状態: 採用
+
 ## 未決定
 - 永続化: SwiftData 優先（要件15章）。Phase 1 冒頭で決定。
 - Bundle ID / Team ID: 未定。現在はプレースホルダ `com.example.pocketagent`。

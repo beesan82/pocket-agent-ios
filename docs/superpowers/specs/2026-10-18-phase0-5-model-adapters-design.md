@@ -49,5 +49,5 @@ Claude Messages API と Apple Foundation Models を設定で切り替え、同�
 
 ## 筆者の判断（要確認ポイント）
 - Claude 既定モデル ID は `claude-sonnet-5-5`（設定画面で変更可）。`maxTokens` 1024。
-- Keychain の単体テストは無署名シミュレータでエンタイトルメント不足（-34018）になる可能性がある。その場合はテストを既知の制約としてスキップし、実機で確認する旨を記録する。
+- Keychain の単体テストは無署名シミュレータで -34018 になった。テスト実行のみアドホック署名に変更して合格（ADR-012）。
 - `ModelChoice` の既定値は `.claude`。
