@@ -14,8 +14,9 @@ enum LLMClientFactory {
             credentials: credentials,
             availability: availability,
             makeClaude: { key in try ClaudeAdapter.makeClient(apiKey: key, model: claudeModel) },
-            // No tools: FoundationModelsClient runs tools inside its own session,
-            // bypassing AgentRunner's approval gate (ADR-009).
+            // FoundationModelsClient runs tools inside its own session, bypassing
+            // AgentRunner's approval policy: any tools added here must come from
+            // `ToolApprovalGate.wrap` (ADR-009).
             makeAppleLocal: { FoundationModelsClient<EmptyContext>(context: EmptyContext()) }
         )
     }
