@@ -6,12 +6,15 @@ import Testing
 
 @MainActor
 struct PersistenceTests {
-    private func makeContainer() throws -> ModelContainer {
-        try AppModelContainer.make(inMemory: true)
+    // Kept as a property: a ModelContext crashes if its container is released.
+    private let container: ModelContainer
+
+    init() throws {
+        container = try AppModelContainer.make(inMemory: true)
     }
 
     @Test func noteStoreCRUDAndSearch() async throws {
-        let store = SwiftDataNoteStore(modelContainer: try makeContainer())
+        let store = SwiftDataNoteStore(modelContainer: container)
         let a = try await store.add("牛乳を買う")
         try await Task.sleep(for: .milliseconds(20))
         let b = try await store.add("Buy milk and eggs")
@@ -31,7 +34,7 @@ struct PersistenceTests {
     }
 
     @Test func turnsComeBackInOrder() throws {
-        let context = try makeContainer().mainContext
+        let context = container.mainContext
         let repo = ConversationRepository(context: context)
         let conversation = try repo.create(choice: .claude)
         try repo.append(ChatTurn(role: .user, text: "one"), to: conversation, choice: .claude)
@@ -45,7 +48,7 @@ struct PersistenceTests {
     }
 
     @Test func titleIsFirstUserText30Chars() throws {
-        let context = try makeContainer().mainContext
+        let context = container.mainContext
         let repo = ConversationRepository(context: context)
         let conversation = try repo.create(choice: .claude)
         #expect(conversation.title == "新しい会話")
@@ -60,7 +63,7 @@ struct PersistenceTests {
     }
 
     @Test func allIsNewestUpdatedFirst() throws {
-        let context = try makeContainer().mainContext
+        let context = container.mainContext
         let repo = ConversationRepository(context: context)
         let first = try repo.create(choice: .claude)
         let second = try repo.create(choice: .claude)
@@ -69,7 +72,7 @@ struct PersistenceTests {
     }
 
     @Test func deletingConversationRemovesTurns() throws {
-        let context = try makeContainer().mainContext
+        let context = container.mainContext
         let repo = ConversationRepository(context: context)
         let conversation = try repo.create(choice: .claude)
         try repo.append(ChatTurn(role: .user, text: "hi"), to: conversation, choice: .claude)
@@ -82,7 +85,6 @@ struct PersistenceTests {
     }
 
     @Test func eraseAllRemovesEverything() async throws {
-        let container = try makeContainer()
         let context = container.mainContext
         let repo = ConversationRepository(context: context)
         let conversation = try repo.create(choice: .claude)
