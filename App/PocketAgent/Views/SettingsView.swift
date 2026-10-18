@@ -7,6 +7,8 @@ struct SettingsView: View {
     @Bindable var settings: ModelSettings
     let credentials: any CredentialStore
     let availability: any ModelAvailabilityChecking
+    let mlxStore: MLXModelStore
+    let mlxRuntime: MLXRuntime
 
     @Environment(\.modelContext) private var modelContext
     @State private var confirmErase = false
@@ -70,6 +72,15 @@ struct SettingsView: View {
             Section("検証") {
                 NavigationLink("1往復テスト（実機検証用）") {
                     RoundTripView(settings: settings, credentials: credentials, availability: availability)
+                }
+            }
+
+            Section("端末内モデル（MLX）") {
+                NavigationLink("モデル管理") {
+                    MLXModelsView(store: mlxStore)
+                }
+                NavigationLink("MLX 検証（実機ゲート）") {
+                    MLXValidationView(store: mlxStore, runtime: mlxRuntime)
                 }
             }
 

@@ -6,13 +6,16 @@ struct ContentView: View {
     let settings: ModelSettings
     let credentials: any CredentialStore
     let availability: any ModelAvailabilityChecking
+    let mlxStore: MLXModelStore
+    let mlxRuntime: MLXRuntime
 
     @State private var path = NavigationPath()
 
     var body: some View {
         NavigationStack(path: $path) {
             ConversationListView(
-                path: $path, settings: settings, credentials: credentials, availability: availability)
+                path: $path, settings: settings, credentials: credentials, availability: availability,
+                mlxStore: mlxStore, mlxRuntime: mlxRuntime)
         }
     }
 }

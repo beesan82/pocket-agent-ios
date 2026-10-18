@@ -4,14 +4,25 @@ import SwiftUI
 @main
 struct PocketAgentApp: App {
     @State private var settings = ModelSettings()
+    @State private var mlxStore: MLXModelStore
+    @State private var mlxRuntime: MLXRuntime
     @State private var container = try? AppModelContainer.make()
     private let credentials = KeychainCredentialStore()
     private let availability = AppleLocalAvailability()
 
+    init() {
+        // One store and one runtime for the whole app; the runtime reads the store's directory.
+        let store = MLXModelStore()
+        _mlxStore = State(initialValue: store)
+        _mlxRuntime = State(initialValue: MLXRuntime(store: store))
+    }
+
     var body: some Scene {
         WindowGroup {
             if let container {
-                ContentView(settings: settings, credentials: credentials, availability: availability)
+                ContentView(
+                    settings: settings, credentials: credentials, availability: availability,
+                    mlxStore: mlxStore, mlxRuntime: mlxRuntime)
                     .modelContainer(container)
             } else {
                 // Fixed text: the underlying error is never shown.

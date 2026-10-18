@@ -7,6 +7,8 @@ struct ConversationListView: View {
     let settings: ModelSettings
     let credentials: any CredentialStore
     let availability: any ModelAvailabilityChecking
+    let mlxStore: MLXModelStore
+    let mlxRuntime: MLXRuntime
 
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ConversationRecord.updatedAt, order: .reverse) private var conversations: [ConversationRecord]
@@ -50,7 +52,9 @@ struct ConversationListView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
-                    SettingsView(settings: settings, credentials: credentials, availability: availability)
+                    SettingsView(
+                        settings: settings, credentials: credentials, availability: availability,
+                        mlxStore: mlxStore, mlxRuntime: mlxRuntime)
                 } label: {
                     Text("設定")
                 }
