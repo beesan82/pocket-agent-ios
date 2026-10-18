@@ -1,6 +1,6 @@
 name: PocketAgent
 options:
-  bundleIdPrefix: com.example
+  bundleIdPrefix: com.beesan82
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
@@ -38,7 +38,7 @@ targets:
         product: AgentRunKitFoundationModels
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.pocketagent
+        PRODUCT_BUNDLE_IDENTIFIER: com.beesan82.pocketagent
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Pocket Agent
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -57,7 +57,7 @@ targets:
       - target: PocketAgent
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.pocketagent.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.beesan82.pocketagent.tests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:

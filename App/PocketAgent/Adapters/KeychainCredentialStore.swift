@@ -14,7 +14,7 @@ struct KeychainCredentialStore: CredentialStore {
     let service: String
     let account: String
 
-    init(service: String = "com.example.pocketagent.anthropic", account: String = "api-key") {
+    init(service: String = "com.beesan82.pocketagent.anthropic", account: String = "api-key") {
         self.service = service
         self.account = account
     }

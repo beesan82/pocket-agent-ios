@@ -4,7 +4,7 @@
 以下はユーザーが各サービスの画面で行う作業。**APIキー（.p8）・Issuer ID・Key ID はチャットやリポジトリに貼らない**（Codemagic の画面にだけ登録する）。
 
 ## 1. Bundle ID を決めて登録する
-1. Bundle ID を決める（例: `<音楽アプリと同じプレフィックス>.pocketagent`）。決まったら Claude に伝える → `project.yml` と `codemagic.yaml` の `com.example.pocketagent` を置き換える。
+1. Bundle ID は **`com.beesan82.pocketagent`**（決定済み・`project.yml` と `codemagic.yaml` に反映済み）。
 2. developer.apple.com → Certificates, IDs & Profiles → Identifiers → ＋ → App IDs → App → Explicit で上の Bundle ID を登録（Capabilities は追加不要）。
 
 ## 2. App Store Connect にアプリを作る

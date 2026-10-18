@@ -7,7 +7,7 @@ import Testing
 @Suite(.serialized)
 struct KeychainCredentialStoreTests {
     private func makeStore() -> KeychainCredentialStore {
-        KeychainCredentialStore(service: "com.example.pocketagent.tests.\(UUID().uuidString)")
+        KeychainCredentialStore(service: "com.beesan82.pocketagent.tests.\(UUID().uuidString)")
     }
 
     @Test func saveReadOverwriteDelete() throws {

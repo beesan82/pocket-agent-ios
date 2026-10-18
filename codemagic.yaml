@@ -16,7 +16,7 @@ workflows:
     environment:
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.example.pocketagent
+        bundle_identifier: com.beesan82.pocketagent
       vars:
         XCODE_PROJECT: PocketAgent.xcodeproj
         XCODE_SCHEME: PocketAgent
