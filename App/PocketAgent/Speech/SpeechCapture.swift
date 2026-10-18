@@ -6,6 +6,8 @@ import Speech
 enum SpeechCaptureError: Error {
     case unavailable
     case noAudioFormat
+    /// The start was superseded by `stop()` or the results stream failed while preparing.
+    case interrupted
 }
 
 /// On-device Japanese speech capture: microphone → SpeechAnalyzer + SpeechTranscriber.
@@ -37,6 +39,10 @@ final class SpeechCapture {
     @ObservationIgnored private var transcriberLocale: Locale?
     @ObservationIgnored private var pipeline: AudioPipeline?
     @ObservationIgnored private var resultsTask: Task<Void, Never>?
+    /// Bumped by every `start()` and by `stop()` during preparation; a running start that
+    /// sees a newer value releases its own pipeline and returns.
+    @ObservationIgnored private var startGeneration = 0
+    @ObservationIgnored private var resultsFailedWhilePreparing = false
 
     func refreshAvailability() async {
         let isAvailable = SpeechTranscriber.isAvailable
@@ -67,7 +73,8 @@ final class SpeechCapture {
         do {
             try await Self.downloadAssets(locale: transcriberLocale ?? Self.japanese)
         } catch {
-            state = .failed(Self.installFailedText)
+            // Never overwrite a running capture's state.
+            if state == .idle || Self.isFailed(state) { state = .failed(Self.installFailedText) }
             await refreshAvailability()
             throw error
         }
@@ -79,39 +86,80 @@ final class SpeechCapture {
         case .preparing, .recording, .finishing: return
         case .idle, .failed: break
         }
-        await refreshAvailability()
-        guard reason == nil else { throw SpeechCaptureError.unavailable }
+        // Claim the start before any await so a double tap cannot build two pipelines.
         state = .preparing
+        startGeneration += 1
+        let generation = startGeneration
+        resultsFailedWhilePreparing = false
         volatileText = ""
         finalText = ""
+        await refreshAvailability()
+        guard generation == startGeneration else { return }  // stopped meanwhile
+        guard reason == nil else {
+            state = .idle
+            throw SpeechCaptureError.unavailable
+        }
+        var created: AudioPipeline?
         do {
             let pipeline = try await AudioPipeline.make(locale: transcriberLocale ?? Self.japanese)
+            created = pipeline
+            guard generation == startGeneration else { throw SpeechCaptureError.interrupted }
             self.pipeline = pipeline
             let transcriber = pipeline.transcriber
             resultsTask = Task { [weak self] in await self?.consume(transcriber) }
             try Self.activateSession()
             try await pipeline.startAnalyzer()
+            guard generation == startGeneration, !resultsFailedWhilePreparing else {
+                throw SpeechCaptureError.interrupted
+            }
             try pipeline.startEngine()
             state = .recording
         } catch {
-            await cancelPipeline()
+            if let created { await created.cancel() }
+            let current = generation == startGeneration
+            if current || (created != nil && self.pipeline === created) {
+                resultsTask?.cancel()
+                resultsTask = nil
+                pipeline = nil
+            }
+            // A newer start owns the session; only the current (or a stopped, idle) start releases it.
+            if current || state == .idle { Self.deactivateSession() }
+            guard current else { return }  // stop() during preparation is not an error
             state = .failed(Self.startFailedText)
             throw error
         }
     }
 
     /// Ends input, waits until every result is final, then releases the microphone.
+    /// Releases a leftover pipeline in any state; during preparation it cancels the start.
     func stop() async {
-        guard state == .recording, let pipeline else { return }
+        switch state {
+        case .preparing:
+            startGeneration += 1  // the running start() releases its own pipeline
+            state = .idle
+            return
+        case .finishing:
+            return  // another stop() is finishing
+        case .idle, .recording, .failed:
+            break
+        }
+        guard let pipeline else { return }
+        let previous = state
+        let graceful = previous == .recording
         state = .finishing
-        pipeline.stopEngine()
-        await pipeline.finishAnalysis()
-        await resultsTask?.value
+        if graceful {
+            pipeline.stopEngine()
+            await pipeline.finishAnalysis()
+            await resultsTask?.value
+        } else {
+            await pipeline.cancel()
+            resultsTask?.cancel()
+        }
         resultsTask = nil
-        self.pipeline = nil
+        if self.pipeline === pipeline { self.pipeline = nil }
         Self.deactivateSession()
         volatileText = ""
-        if state == .finishing { state = .idle }
+        if state == .finishing { state = graceful ? .idle : previous }
     }
 
     private func consume(_ transcriber: SpeechTranscriber) async {
@@ -127,10 +175,28 @@ final class SpeechCapture {
                 }
             }
         } catch {
-            if state == .recording || state == .finishing {
-                state = .failed(Self.transcriptionFailedText)
-            }
+            await handleResultsFailure()
         }
+    }
+
+    private func handleResultsFailure() async {
+        switch state {
+        case .recording:
+            // Release engine, analyzer and session first so a later start() begins clean.
+            await cancelPipeline()
+            state = .failed(Self.transcriptionFailedText)
+        case .finishing:
+            state = .failed(Self.transcriptionFailedText)  // stop() releases the pipeline
+        case .preparing:
+            resultsFailedWhilePreparing = true  // start() aborts before starting the engine
+        case .idle, .failed:
+            break
+        }
+    }
+
+    private static func isFailed(_ state: State) -> Bool {
+        if case .failed = state { return true }
+        return false
     }
 
     private func cancelPipeline() async {
@@ -217,7 +283,14 @@ private final class AudioPipeline: @unchecked Sendable {
     func startEngine() throws {
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
-        converter = inputFormat == analyzerFormat ? nil : AVAudioConverter(from: inputFormat, to: analyzerFormat)
+        if inputFormat == analyzerFormat {
+            converter = nil
+        } else {
+            guard let made = AVAudioConverter(from: inputFormat, to: analyzerFormat) else {
+                throw SpeechCaptureError.noAudioFormat
+            }
+            converter = made
+        }
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { @Sendable [self] buffer, _ in
             feed(buffer)
         }
