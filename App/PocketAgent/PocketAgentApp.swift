@@ -10,6 +10,9 @@ struct PocketAgentApp: App {
     private let credentials = KeychainCredentialStore()
     private let availability = AppleLocalAvailability()
     private let measurementLog = MeasurementLog()
+    @State private var developer = DeveloperSettings()
+    private let tokenStore = KeychainCredentialStore(
+        service: "com.beesan82.pocketagent.github", account: "measurement-token")
 
     init() {
         // One store and one runtime for the whole app; the runtime reads the store's directory.
@@ -30,7 +33,8 @@ struct PocketAgentApp: App {
             if let container {
                 ContentView(
                     settings: settings, credentials: credentials, availability: availability,
-                    mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog)
+                    mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
+                    developer: developer, tokenStore: tokenStore)
                     .modelContainer(container)
             } else {
                 // Fixed text: the underlying error is never shown.

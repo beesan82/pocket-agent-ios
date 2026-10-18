@@ -10,6 +10,8 @@ struct SettingsView: View {
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
+    @Bindable var developer: DeveloperSettings
+    let tokenStore: any CredentialStore
 
     @Environment(\.modelContext) private var modelContext
     @State private var confirmErase = false
@@ -17,6 +19,9 @@ struct SettingsView: View {
     @State private var keyInput = ""
     @State private var hasKey = false
     @State private var keyStatus: String?
+    @State private var tokenInput = ""
+    @State private var hasToken = false
+    @State private var tokenStatus: String?
     @State private var appleReason: ModelUnavailableReason?
 
     var body: some View {
@@ -81,9 +86,13 @@ struct SettingsView: View {
                     MLXModelsView(store: mlxStore, measurementLog: measurementLog)
                 }
                 NavigationLink("MLX 検証（実機ゲート）") {
-                    MLXValidationView(store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog)
+                    MLXValidationView(
+                        store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog,
+                        developer: developer, tokenStore: tokenStore)
                 }
             }
+
+            developerSection
 
             Section("データ") {
                 Button("全データ削除", role: .destructive) { confirmErase = true }
@@ -105,6 +114,60 @@ struct SettingsView: View {
             Button("キャンセル", role: .cancel) {}
         }
         .task { refresh() }
+    }
+
+    private var developerSection: some View {
+        Section {
+            Toggle("開発者モード", isOn: $developer.isEnabled)
+            if developer.isEnabled {
+                SecureField("GitHub トークン", text: $tokenInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("保存") { saveToken() }
+                    .disabled(tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("削除", role: .destructive) { deleteToken() }
+                    .disabled(!hasToken)
+                LabeledContent("トークン", value: hasToken ? "保存済み" : "未保存")
+                if let tokenStatus {
+                    Text(tokenStatus).font(.footnote).foregroundStyle(.secondary)
+                }
+                TextField("送信先リポジトリ", text: $developer.repository)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !DeveloperSettings.isValidRepository(developer.repository) {
+                    Text(UploadFailure.invalidRepository.userMessage)
+                        .font(.footnote).foregroundStyle(.red)
+                }
+            }
+        } header: {
+            Text("開発者")
+        } footer: {
+            if developer.isEnabled {
+                Text("測定ログを、あなたが送信ボタンを押したときだけ、この非公開リポジトリの Issue として送ります。ログには音声テストで話した内容が含まれます。トークンは端末の Keychain にだけ保存されます。")
+            }
+        }
+    }
+
+    private func saveToken() {
+        let token = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try tokenStore.saveAPIKey(token)
+            tokenInput = ""
+            hasToken = true
+            tokenStatus = "保存しました"
+        } catch {
+            tokenStatus = "保存に失敗しました"
+        }
+    }
+
+    private func deleteToken() {
+        do {
+            try tokenStore.deleteAPIKey()
+            hasToken = false
+            tokenStatus = "削除しました"
+        } catch {
+            tokenStatus = "削除に失敗しました"
+        }
     }
 
     private func eraseAll() async {
@@ -130,6 +193,7 @@ struct SettingsView: View {
             hasKey = false
             keyStatus = "キーの読み出しに失敗しました"
         }
+        hasToken = (try? tokenStore.readAPIKey())?.isEmpty == false
     }
 
     private func saveKey() {

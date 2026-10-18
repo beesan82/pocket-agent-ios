@@ -9,6 +9,8 @@ struct MLXValidationView: View {
     let store: MLXModelStore
     let runtime: MLXRuntime
     let measurementLog: MeasurementLog
+    let developer: DeveloperSettings
+    let tokenStore: any CredentialStore
 
     /// 暫定: interim summary prompt for the gate measurement; the real prompt is decided later.
     static let interimSystemPrompt = """
@@ -56,6 +58,11 @@ struct MLXValidationView: View {
     @State private var speechMessage: String?
     @State private var copied = false
     @State private var confirmClear = false
+    @State private var confirmUpload = false
+    @State private var uploading = false
+    @State private var hasToken = false
+    @State private var uploadMessage: String?
+    @State private var uploadSucceeded = false
 
     var body: some View {
         Form {
@@ -69,6 +76,7 @@ struct MLXValidationView: View {
         .task {
             store.refresh()
             refreshMemory()
+            hasToken = (try? tokenStore.readAPIKey())?.isEmpty == false
             await speech.refreshAvailability()
             measurementLog.append("音声可否: \(speech.reason?.userMessage ?? "利用可能")")
         }
@@ -103,6 +111,20 @@ struct MLXValidationView: View {
             if copied {
                 Text("コピーしました").font(.footnote).foregroundStyle(.secondary)
             }
+            if developer.isEnabled {
+                Button("GitHub に送信") { confirmUpload = true }
+                    .buttonStyle(.bordered)
+                    .disabled(uploading || !hasToken)
+                if !hasToken {
+                    Text("設定の開発者モードでトークンを保存してください")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                if uploading { ProgressView("送信中…") }
+                if let uploadMessage {
+                    Text(uploadMessage).font(.footnote)
+                        .foregroundStyle(uploadSucceeded ? Color.secondary : Color.red)
+                }
+            }
             ForEach(measurementLog.entries.suffix(5)) { entry in
                 Text(entry.line)
                     .font(.system(.caption2, design: .monospaced))
@@ -114,12 +136,57 @@ struct MLXValidationView: View {
         } footer: {
             Text("コピーして、そのままチャットへ貼り付けてください。")
         }
+        .confirmationDialog(
+            "\(developer.repository) の非公開 Issue として送信します（\(measurementLog.entries.count) 行、音声テストの内容を含みます）",
+            isPresented: $confirmUpload, titleVisibility: .visible
+        ) {
+            Button("送信") { Task { await uploadLog() } }
+            Button("キャンセル", role: .cancel) {}
+        }
         .confirmationDialog("ログを消去しますか？", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("クリア", role: .destructive) {
                 measurementLog.clear()
                 copied = false
             }
             Button("キャンセル", role: .cancel) {}
+        }
+    }
+
+    /// Only reachable from the confirmation dialog's 送信 button.
+    private func uploadLog() async {
+        guard !uploading, developer.isEnabled,
+              let token = try? tokenStore.readAPIKey(), !token.isEmpty
+        else {
+            hasToken = false
+            return
+        }
+        uploading = true
+        uploadMessage = nil
+        let log = measurementLog.render(deviceInfo: DeviceInfo.summary, appVersion: DeviceInfo.appVersion)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let title = "測定ログ \(formatter.string(from: Date())) \(Self.deviceModelID)"
+        let outcome = await MeasurementUploader().upload(
+            log: log, title: title, repository: developer.repository, token: token)
+        uploading = false
+        switch outcome {
+        case let .created(number):
+            uploadSucceeded = true
+            uploadMessage = "送信しました（Issue #\(number)）"
+            measurementLog.append("ログを送信しました（Issue #\(number)）")
+        case let .failed(failure):
+            uploadSucceeded = false
+            uploadMessage = failure.userMessage
+        }
+    }
+
+    private static var deviceModelID: String {
+        var system = utsname()
+        uname(&system)
+        return withUnsafeBytes(of: &system.machine) { buffer in
+            String(decoding: buffer.prefix { $0 != 0 }, as: UTF8.self)
         }
     }
 
