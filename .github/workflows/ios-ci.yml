@@ -47,12 +47,29 @@ jobs:
           brew install xcodegen
           xcodegen --version
           xcodegen generate
+          # XcodeGen does not manage Package.resolved: seed the app with the committed pins
+          # (same remote graph as PocketAgentRuntime) so transitive versions stay fixed.
+          mkdir -p PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          cp Packages/PocketAgentRuntime/Package.resolved \
+            PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
       - name: Resolve packages
         run: |
           xcodebuild -resolvePackageDependencies -project PocketAgent.xcodeproj -scheme PocketAgent
           # Location varies with Xcode version / local packages; log whatever exists, never fail here.
           find . -name Package.resolved -not -path '*/.build/*' -print -exec cat {} \; || true
+          # Fail if resolution drifted from the committed pins (ADR-002).
+          python3 - <<'EOF'
+          import json
+          def pins(path):
+              return {p["identity"]: p["state"].get("revision") for p in json.load(open(path))["pins"]}
+          committed = pins("Packages/PocketAgentRuntime/Package.resolved")
+          app = pins("PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
+          drift = {k: (committed.get(k), app.get(k)) for k in committed.keys() | app.keys() if committed.get(k) != app.get(k)}
+          if drift:
+              raise SystemExit(f"::error::Package pins drifted: {drift}")
+          print(f"pins match ({len(app)} packages)")
+          EOF
 
       - name: Build (iOS Simulator, unsigned)
         run: |
