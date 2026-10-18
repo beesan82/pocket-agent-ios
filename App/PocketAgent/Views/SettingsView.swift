@@ -175,7 +175,7 @@ struct SettingsView: View {
             try await DataReset.eraseAll(
                 context: modelContext,
                 journal: SwiftDataJournalStore(modelContainer: modelContext.container),
-                credentials: credentials)
+                credentials: credentials, githubToken: tokenStore)
             eraseStatus = "すべてのデータを削除しました"
         } catch {
             eraseStatus = "削除を完了できませんでした。もう一度お試しください"

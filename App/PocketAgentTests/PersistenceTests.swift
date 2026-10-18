@@ -93,13 +93,16 @@ struct PersistenceTests {
         let notes = JournalNoteStore(journal: journal)
         _ = try await notes.add("memo")
         let credentials = SpyCredentialStore(key: "test-key")
+        let githubToken = SpyCredentialStore(key: "test-token-123")
 
-        try await DataReset.eraseAll(context: context, journal: journal, credentials: credentials)
+        try await DataReset.eraseAll(context: context, journal: journal, credentials: credentials, githubToken: githubToken)
 
         #expect(try context.fetchCount(FetchDescriptor<ConversationRecord>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<TurnRecord>()) == 0)
         #expect(try await notes.all().isEmpty)
         #expect(credentials.deletes == 1)
+        #expect(githubToken.deletes == 1)
+        #expect(try githubToken.readAPIKey() == nil)
         #expect(try credentials.readAPIKey() == nil)
     }
 }

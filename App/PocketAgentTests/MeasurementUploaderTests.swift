@@ -12,7 +12,14 @@ struct MeasurementUploaderTests {
         .http(status: 201, headers: [:], body: "{\"number\": \(number), \"title\": \"x\"}")
     }
 
+    private let privateRepo = StubURLProtocol.Reply.http(status: 200, headers: [:], body: "{\"private\": true, \"id\": 1}")
+
+    /// `replies` are the POST replies; the private-repository check (GET) is answered first.
     private func upload(_ replies: [StubURLProtocol.Reply], log: String = "# log\nline") async -> UploadResult {
+        await uploadRaw([privateRepo] + replies, log: log)
+    }
+
+    private func uploadRaw(_ replies: [StubURLProtocol.Reply], log: String = "# log\nline") async -> UploadResult {
         let uploader = MeasurementUploader(session: StubURLProtocol.session(replying: replies))
         return await uploader.upload(log: log, title: title, repository: repository, token: token)
     }
@@ -25,8 +32,8 @@ struct MeasurementUploaderTests {
         let result = await upload([created()], log: "# log\nline")
 
         #expect(result == .created(issueNumber: 7))
-        #expect(StubURLProtocol.requests.count == 1)
-        let request = try #require(StubURLProtocol.requests.first)
+        #expect(StubURLProtocol.requests.count == 2)
+        let request = StubURLProtocol.requests[1]
         #expect(request.method == "POST")
         #expect(request.url?.absoluteString == "https://api.github.com/repos/owner/private-repo/issues")
         #expect(request.headers["Authorization"] == "Bearer test-token-123")
@@ -70,9 +77,9 @@ struct MeasurementUploaderTests {
 
         #expect(result == .created(issueNumber: 9))
         let requests = StubURLProtocol.requests
-        #expect(requests.count == 2)
-        #expect(try jsonBody(requests[0])["labels"] != nil)
-        let retry = try jsonBody(requests[1])
+        #expect(requests.count == 3)
+        #expect(try jsonBody(requests[1])["labels"] != nil)
+        let retry = try jsonBody(requests[2])
         #expect(retry["labels"] == nil)
         #expect(retry["title"] as? String == title)
     }
@@ -80,7 +87,7 @@ struct MeasurementUploaderTests {
     @Test func repeatedUnprocessableMapsToServer() async {
         let reply = StubURLProtocol.Reply.http(status: 422, headers: [:], body: "{}")
         #expect(await upload([reply]) == .failed(.server(422)))
-        #expect(StubURLProtocol.requests.count == 2)
+        #expect(StubURLProtocol.requests.count == 3)
     }
 
     @Test func longLogIsTruncatedKeepingHeaderAndNewest() async throws {
@@ -92,7 +99,7 @@ struct MeasurementUploaderTests {
         let result = await upload([created()], log: log)
 
         #expect(result == .created(issueNumber: 7))
-        let request = try #require(StubURLProtocol.requests.first)
+        let request = StubURLProtocol.requests[1]
         let body = try #require(try jsonBody(request)["body"] as? String)
         #expect(body.count <= 60_000)
         let bodyLines = body.components(separatedBy: "\n")
@@ -112,8 +119,42 @@ struct MeasurementUploaderTests {
     @Test func shortLogIsSentUnchanged() async throws {
         let log = (0..<100).map { "line \($0)" }.joined(separator: "\n")
         _ = await upload([created()], log: log)
-        let request = try #require(StubURLProtocol.requests.first)
+        let request = StubURLProtocol.requests[1]
         #expect(try jsonBody(request)["body"] as? String == log)
+    }
+
+    @Test func privateRepositoryThenPost() async {
+        let result = await uploadRaw([privateRepo, created(3)])
+
+        #expect(result == .created(issueNumber: 3))
+        let requests = StubURLProtocol.requests
+        #expect(requests.map(\.method) == ["GET", "POST"])
+        #expect(requests[0].url?.absoluteString == "https://api.github.com/repos/owner/private-repo")
+        #expect(requests[0].headers["Authorization"] == "Bearer test-token-123")
+        #expect(requests[0].headers["Accept"] == "application/vnd.github+json")
+        #expect(requests[0].headers["X-GitHub-Api-Version"] == "2022-11-28")
+    }
+
+    @Test func publicRepositoryIsRefusedWithoutPost() async {
+        let publicRepo = StubURLProtocol.Reply.http(status: 200, headers: [:], body: "{\"private\": false}")
+        let result = await uploadRaw([publicRepo, created()])
+
+        #expect(result == .failed(.repositoryNotPrivate))
+        #expect(StubURLProtocol.requests.map(\.method) == ["GET"])
+    }
+
+    @Test func repositoryCheckMapsFailures() async {
+        func reply(_ status: Int, _ body: String = "{}") -> StubURLProtocol.Reply {
+            .http(status: status, headers: [:], body: body)
+        }
+        #expect(await uploadRaw([reply(401), created()]) == .failed(.unauthorized))
+        #expect(await uploadRaw([reply(404), created()]) == .failed(.notFound))
+        #expect(await uploadRaw([reply(429), created()]) == .failed(.rateLimited))
+        #expect(await uploadRaw([reply(500), created()]) == .failed(.server(500)))
+        #expect(await uploadRaw([reply(200, "{}"), created()]) == .failed(.badResponse))
+        #expect(await uploadRaw([reply(200, "not json"), created()]) == .failed(.badResponse))
+        #expect(await uploadRaw([.failure]) == .failed(.network))
+        #expect(StubURLProtocol.requests.map(\.method) == ["GET"])
     }
 
     @Test func invalidRepositoryNeverHitsNetwork() async {
@@ -127,13 +168,14 @@ struct MeasurementUploaderTests {
 
     @Test func failureTextsAreFixedAndNeverContainToken() {
         let failures: [UploadFailure] = [
-            .invalidRepository, .unauthorized, .notFound, .rateLimited, .network, .server(500), .badResponse,
+            .invalidRepository, .repositoryNotPrivate, .unauthorized, .notFound, .rateLimited, .network, .server(500), .badResponse,
         ]
         for failure in failures {
             #expect(!failure.userMessage.isEmpty)
             #expect(!failure.userMessage.contains(token))
         }
         #expect(UploadFailure.server(503).userMessage == "サーバーエラー（HTTP 503）")
+        #expect(UploadFailure.repositoryNotPrivate.userMessage == "送信先が非公開リポジトリではないため送信しませんでした")
         #expect(UploadFailure.unauthorized.userMessage == "トークンが無効か、権限がありません")
     }
 }

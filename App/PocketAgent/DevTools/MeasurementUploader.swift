@@ -1,12 +1,13 @@
 import Foundation
 
 enum UploadFailure: Equatable {
-    case invalidRepository, unauthorized, notFound, rateLimited, network, server(Int), badResponse
+    case invalidRepository, repositoryNotPrivate, unauthorized, notFound, rateLimited, network, server(Int), badResponse
 
     /// Fixed texts only; neither the token nor any response body is ever included.
     var userMessage: String {
         switch self {
         case .invalidRepository: "送信先リポジトリの形式が正しくありません（owner/name）"
+        case .repositoryNotPrivate: "送信先が非公開リポジトリではないため送信しませんでした"
         case .unauthorized: "トークンが無効か、権限がありません"
         case .notFound: "リポジトリが見つかりません（非公開リポジトリと権限を確認してください）"
         case .rateLimited: "送信回数の上限に達しました。しばらく待ってください"

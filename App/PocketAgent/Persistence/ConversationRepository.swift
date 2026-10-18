@@ -78,11 +78,12 @@ final class ConversationRepository {
 }
 
 enum DataReset {
-    /// Erases conversations, the journal (notes included) and the API key. Every step is attempted;
+    /// Erases conversations, the journal (notes included), the API key and the GitHub token. Every step is attempted;
     /// the first error is thrown afterwards.
     @MainActor
     static func eraseAll(
-        context: ModelContext, journal: any JournalStore, credentials: any CredentialStore
+        context: ModelContext, journal: any JournalStore, credentials: any CredentialStore,
+        githubToken: any CredentialStore
     ) async throws {
         var firstError: Error?
         do { try ConversationRepository(context: context).deleteAll() } catch { firstError = firstError ?? error }
