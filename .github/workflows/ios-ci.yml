@@ -67,10 +67,12 @@ jobs:
           set -o pipefail
           DEST_ID=$(bash ci/pick-simulator.sh)
           echo "Simulator: $DEST_ID"
+          # Ad-hoc ("Sign to Run Locally", no certificate/team): unsigned simulator apps
+          # get errSecMissingEntitlement (-34018) from the Keychain, so Keychain tests need it.
           xcodebuild test \
             -project PocketAgent.xcodeproj -scheme PocketAgent \
             -destination "id=$DEST_ID" \
-            CODE_SIGNING_ALLOWED=NO | tee test.log
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= | tee test.log
 
       - name: Upload Package.resolved and logs
         if: always()
