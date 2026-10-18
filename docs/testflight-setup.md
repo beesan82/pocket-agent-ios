@@ -32,6 +32,11 @@ Codemagic の `ios_signing` は、事前に登録された証明書とプロフ�
 2. developer.apple.com → プロファイル → ＋ → 配信「App Store Connect」→ App ID `com.beesan82.pocketagent` → 手順1の証明書 → 名前 `Pocket Agent App Store` → 生成。
 3. Codemagic → Code signing identities → iOS provisioning profiles → Fetch profiles → `Pocket Agent App Store` を選択（Reference name `pocketagent-appstore`）→ Download selected。
 
+## 4.6 Metal Toolchain（Phase 2 以降、MLX を含むビルドに必須）
+Xcode 26 では Metal コンパイラが別コンポーネントになり、Codemagic のイメージには入っていない。MLX の `.metal` ファイルのコンパイルで
+「cannot execute tool 'metal' due to missing Metal Toolchain」と失敗する（2026-10-19 に発生）。`codemagic.yaml` の先頭ステップで
+`xcodebuild -downloadComponent MetalToolchain` を実行して取得する（毎ビルド数分かかる）。GitHub Actions の macos-26 イメージには同梱済み。
+
 ## 5. ビルドを実行する
 1. Codemagic → Pocket Agent → Start new build → ブランチ `main` / ワークフロー **iOS TestFlight**。
 2. 成功すると App Store Connect の TestFlight に処理中のビルドが現れる（処理に数分〜数十分）。

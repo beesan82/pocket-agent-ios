@@ -27,6 +27,10 @@ workflows:
         APP_STORE_APPLE_ID: "6824194188"
       xcode: latest
     scripts:
+      - name: Install Metal toolchain (Xcode 26 ships it as a separate component; MLX compiles .metal files)
+        script: |
+          xcodebuild -downloadComponent MetalToolchain
+          xcrun -sdk iphoneos metal --version
       - name: Generate Xcode project (XcodeGen) with pinned packages
         script: |
           brew install xcodegen
