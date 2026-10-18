@@ -68,7 +68,7 @@ struct RoundTripView: View {
             client = resolved
         case let .failure(error):
             usedModel = nil
-            phase = .failed(Self.message(for: error))
+            phase = .failed(RunFailureText.message(for: error))
             return
         }
 
@@ -90,28 +90,9 @@ struct RoundTripView: View {
     }
 
     private static func phase(for outcome: AgentRunOutcome) -> Phase {
-        switch outcome {
-        case let .completed(text):
-            .finished(text.isEmpty ? "（空の応答）" : text)
-        case let .endedEarly(reason, _):
-            .failed("途中で終了しました（\(reason)）")
-        case let .stepLimitReached(limit):
-            .failed("上限（\(limit)ステップ）に達したため停止しました")
-        case let .tokenBudgetExceeded(budget, used):
-            .failed("トークン上限を超えました（\(used)/\(budget)）")
-        case .cancelled:
-            .failed("停止しました")
+        if case let .completed(text) = outcome {
+            return .finished(text.isEmpty ? RunFailureText.emptyReply : text)
         }
-    }
-
-    private static func message(for error: ModelResolutionError) -> String {
-        switch error {
-        case let .unavailable(reason):
-            reason.userMessage
-        case .credentialReadFailed:
-            "APIキーを読み出せませんでした。設定画面で保存し直してください。"
-        case .clientCreationFailed:
-            "モデルを準備できませんでした。設定画面のモデルIDを確認してください。"
-        }
+        return .failed(RunFailureText.message(for: outcome) ?? RunFailureText.stopped)
     }
 }

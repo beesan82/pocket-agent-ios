@@ -4,9 +4,12 @@ import Observation
 import PocketAgentCore
 import PocketAgentRuntime
 
+/// Builds the client for a choice. `appleLocalTools` are already approval-gated and
+/// belong inside the on-device client; the Claude path ignores them.
 typealias ClientResolver = @MainActor (ModelChoice, _ appleLocalTools: [any AnyTool<EmptyContext>])
     -> Result<any LLMClient, ModelResolutionError>
 
+/// One conversation on screen: runs one `AgentRunner.run` per user message and persists turns.
 @MainActor
 @Observable
 final class ChatSession {
@@ -16,8 +19,21 @@ final class ChatSession {
         case failed(String)
     }
 
-    private(set) var turns: [ChatTurn] = []
+    nonisolated static let notFoundSummary = "該当するメモがありません"
+    static let saveFailedMessage = "保存できませんでした"
+
+    private(set) var turns: [ChatTurn]
     private(set) var status = Status.idle
+
+    @ObservationIgnored private let conversation: ConversationRecord
+    @ObservationIgnored private let repository: ConversationRepository
+    @ObservationIgnored private let notes: any NoteStore
+    @ObservationIgnored private let settings: ModelSettings
+    @ObservationIgnored private let resolve: ClientResolver
+    /// "Allow for this conversation" lives here: shared by every turn and both tool paths.
+    @ObservationIgnored private let approvals: ConversationApprovals
+    @ObservationIgnored private let approvalHandler: ToolApprovalGate.ApprovalHandler
+    @ObservationIgnored private var task: Task<Void, Never>?
 
     init(
         conversation: ConversationRecord,
@@ -26,21 +42,141 @@ final class ChatSession {
         settings: ModelSettings,
         broker: ApprovalBroker,
         resolve: @escaping ClientResolver
-    ) {}
+    ) {
+        self.conversation = conversation
+        self.repository = repository
+        self.notes = notes
+        self.settings = settings
+        self.resolve = resolve
+        turns = repository.turns(of: conversation)
+        let approvals = ConversationApprovals()
+        self.approvals = approvals
+        approvalHandler = approvals.handler(asking: { [notes] request in
+            let summary = await ChatSession.summary(for: request, notes: notes)
+            return await broker.ask(request, summary: summary)
+        })
+    }
 
+    /// The production resolver. Reads `claudeModel` at send time so settings changes apply.
     static func liveResolver(
         credentials: any CredentialStore,
         availability: any ModelAvailabilityChecking,
         settings: ModelSettings
     ) -> ClientResolver {
-        { _, _ in .failure(.clientCreationFailed) }
+        { choice, appleLocalTools in
+            LLMClientFactory.resolver(
+                credentials: credentials, availability: availability,
+                claudeModel: settings.claudeModel, appleLocalTools: appleLocalTools
+            ).resolve(choice)
+        }
     }
 
-    func send(_ text: String) {}
+    func send(_ text: String) {
+        let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty, status != .running else { return }
 
-    func stop() {}
+        let choice = settings.choice
+        let previousTurns = turns
+        let userTurn = ChatTurn(role: .user, text: message)
+        do {
+            try repository.append(userTurn, to: conversation, choice: choice)
+        } catch {
+            status = .failed(Self.saveFailedMessage)
+            return
+        }
+        turns.append(userTurn)
 
+        // Tool placement follows the choice: on-device tools run inside the client's
+        // session, so they are gated there and the runner gets none.
+        let handler = approvalHandler
+        let appleLocalTools: [any AnyTool<EmptyContext>] = switch choice {
+        case .claude: []
+        case .appleLocal: ToolApprovalGate.wrap(NoteTools.make(store: notes, limit: .appleLocal), approval: handler)
+        }
+        let client: any LLMClient
+        switch resolve(choice, appleLocalTools) {
+        case let .success(resolved):
+            client = resolved
+        case let .failure(error):
+            status = .failed(RunFailureText.message(for: error))
+            return
+        }
+
+        let runnerTools: [RegisteredTool<EmptyContext>] = switch choice {
+        case .claude: NoteTools.make(store: notes, limit: .claude)
+        case .appleLocal: []
+        }
+        let budget: HistoryBudget = switch choice {
+        case .claude: .claude
+        case .appleLocal: .appleLocal
+        }
+        let runner = AgentRunner<EmptyContext>(
+            client: client, tools: runnerTools, systemPrompt: ConversationContext.systemPrompt)
+        let history = ConversationContext.history(from: previousTurns, budget: budget)
+
+        status = .running
+        task = Task {
+            let outcome: Result<AgentRunOutcome, any Error>
+            do {
+                outcome = try await .success(runner.run(
+                    message, history: history, context: EmptyContext(), approval: handler))
+            } catch {
+                outcome = .failure(error)
+            }
+            self.finish(outcome, choice: choice)
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+    }
+
+    private func finish(_ result: Result<AgentRunOutcome, any Error>, choice: ModelChoice) {
+        task = nil
+        switch result {
+        case let .success(.completed(text)):
+            let reply = ChatTurn(role: .assistant, text: text.isEmpty ? RunFailureText.emptyReply : text)
+            do {
+                try repository.append(reply, to: conversation, choice: choice)
+            } catch {
+                status = .failed(Self.saveFailedMessage)
+                return
+            }
+            turns.append(reply)
+            status = .idle
+        case let .success(outcome):
+            status = .failed(RunFailureText.message(for: outcome) ?? RunFailureText.stopped)
+        case let .failure(error):
+            // Never show `error` itself: transport errors can carry response bodies.
+            status = .failed(LLMErrorDescriber.userMessage(for: error))
+        }
+    }
+
+    /// What the approval sheet says the tool will do.
     nonisolated static func summary(for request: PendingApproval, notes: any NoteStore) async -> String {
-        ""
+        switch request.toolName {
+        case NoteToolName.save:
+            return decodeArguments(SaveNoteArguments.self, request.arguments)?.text ?? request.arguments
+        case NoteToolName.delete:
+            guard let arguments = decodeArguments(DeleteNoteArguments.self, request.arguments),
+                  let id = UUID(uuidString: arguments.id),
+                  let note = try? await notes.note(id: id)
+            else { return notFoundSummary }
+            return note.text
+        default:
+            return request.arguments
+        }
     }
+}
+
+private struct SaveNoteArguments: Decodable {
+    let text: String
+}
+
+private struct DeleteNoteArguments: Decodable {
+    let id: String
+}
+
+private func decodeArguments<T: Decodable>(_ type: T.Type, _ json: String) -> T? {
+    try? JSONDecoder().decode(type, from: Data(json.utf8))
 }
