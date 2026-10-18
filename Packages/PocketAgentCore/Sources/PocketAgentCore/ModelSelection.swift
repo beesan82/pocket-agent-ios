@@ -39,8 +39,16 @@ public enum ModelUnavailableReason: Sendable, Equatable {
             "端末内モデルを準備中です（ダウンロード中など）。しばらくしてから再試行してください。"
         case .unsupportedOS:
             "このiOSバージョンでは端末内モデルを利用できません。"
-        case .simulatorUnsupported, .modelNotDownloaded, .modelLoading, .insufficientDiskSpace, .unloadedForMemory:
-            ""
+        case .simulatorUnsupported:
+            "シミュレータでは端末内モデルを利用できません"
+        case .modelNotDownloaded:
+            "モデルが未ダウンロードです。設定のモデル管理からダウンロードしてください"
+        case .modelLoading:
+            "モデルを読み込み中です"
+        case let .insufficientDiskSpace(requiredBytes):
+            "空き容量が不足しています（必要: 約 \(String(format: "%.1f", Double(requiredBytes) / 1_000_000_000)) GB）"
+        case .unloadedForMemory:
+            "メモリ不足のためモデルを解放しました。もう一度読み込んでください"
         case let .unknown(detail):
             "端末内モデルを利用できません（\(detail)）。"
         }
