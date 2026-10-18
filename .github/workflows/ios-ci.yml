@@ -81,6 +81,11 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO | tee build.log
 
+      - name: Build (iOS device, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build             -project PocketAgent.xcodeproj -scheme PocketAgent             -destination 'generic/platform=iOS'             CODE_SIGNING_ALLOWED=NO | tee build-device.log
+
       - name: Unit tests (iOS Simulator)
         run: |
           set -o pipefail
@@ -102,5 +107,6 @@ jobs:
             **/Package.resolved
             !**/.build/**
             build.log
+            build-device.log
             test.log
           if-no-files-found: ignore

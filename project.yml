@@ -18,6 +18,10 @@ packages:
   AgentRunKit:
     url: https://github.com/Tom-Ryder/AgentRunKit.git
     exactVersion: 6.1.0
+  # Same revision as the transitive pin (Package.resolved); listed so the app can link the MLX product.
+  MLX:
+    url: https://github.com/ml-explore/mlx-swift.git
+    exactVersion: 0.30.6
   PocketAgentCore:
     path: Packages/PocketAgentCore
   PocketAgentRuntime:
@@ -36,6 +40,10 @@ targets:
         product: AgentRunKit
       - package: AgentRunKit
         product: AgentRunKitFoundationModels
+      - package: AgentRunKit
+        product: AgentRunKitMLX
+      - package: MLX
+        product: MLX
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beesan82.pocketagent
