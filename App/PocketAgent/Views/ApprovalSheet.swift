@@ -7,7 +7,6 @@ struct ApprovalSheet: View {
     let request: PendingApprovalRequest
     let broker: ApprovalBroker
 
-    @State private var answered = false
 
     static func toolLabel(_ name: String) -> String {
         switch name {
@@ -52,13 +51,9 @@ struct ApprovalSheet: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium, .large])
-        .onDisappear {
-            if !answered { broker.answer(.deny(reason: nil)) }
-        }
     }
 
     private func answer(_ decision: UserApprovalDecision) {
-        answered = true
         broker.answer(decision)
     }
 }

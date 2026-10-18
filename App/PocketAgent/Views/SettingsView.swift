@@ -116,7 +116,7 @@ struct SettingsView: View {
             hasKey = try credentials.readAPIKey()?.isEmpty == false
         } catch {
             hasKey = false
-            keyStatus = "キーの読み出しに失敗しました（\(error)）"
+            keyStatus = "キーの読み出しに失敗しました"
         }
     }
 
@@ -128,7 +128,7 @@ struct SettingsView: View {
             hasKey = true
             keyStatus = "保存しました"
         } catch {
-            keyStatus = "保存に失敗しました（\(error)）"
+            keyStatus = "保存に失敗しました"
         }
     }
 
@@ -138,7 +138,7 @@ struct SettingsView: View {
             hasKey = false
             keyStatus = "削除しました"
         } catch {
-            keyStatus = "削除に失敗しました（\(error)）"
+            keyStatus = "削除に失敗しました"
         }
     }
 }

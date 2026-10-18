@@ -68,8 +68,8 @@ private struct ChatContent: View {
             }
         }
         .safeAreaInset(edge: .bottom) { inputBar }
-        .sheet(item: Binding(get: { broker.pending }, set: { _ in })) { request in
-            ApprovalSheet(request: request, broker: broker)
+        .sheet(item: Binding(get: { broker.pending }, set: { if $0 == nil { broker.answer(.deny(reason: nil)) } })) { request in
+            ApprovalSheet(request: request, broker: broker).id(request.id)
         }
     }
 
