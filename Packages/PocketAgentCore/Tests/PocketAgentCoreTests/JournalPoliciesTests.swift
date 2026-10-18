@@ -14,5 +14,6 @@ struct JournalPoliciesTests {
         #expect(DiskSpaceRule.canDownload(modelBytes: 1000, freeBytes: 1500))
         #expect(DiskSpaceRule.canDownload(modelBytes: 1000, freeBytes: 1499) == false)
         #expect(DiskSpaceRule.canDownload(modelBytes: 0, freeBytes: 0))
+        #expect(DiskSpaceRule.requiredBytes(modelBytes: 1000) == 1500)
     }
 }

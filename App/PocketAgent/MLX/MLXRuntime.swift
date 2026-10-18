@@ -10,14 +10,15 @@ import MLXLMCommon
 #endif
 
 protocol ModelLoading: Sendable {
-    func load(_ model: MLXModelInfo, from base: URL) async throws -> any LLMClient
+    /// Loads from the local model directory only (never downloads).
+    func load(_ model: MLXModelInfo, directory: URL) async throws -> any LLMClient
     /// Frees cached GPU buffers after the client has been dropped.
     func releaseMemory()
 }
 
 /// Real loader. On the simulator it never touches MLX or Hub.
 struct MLXModelLoader: ModelLoading {
-    func load(_ model: MLXModelInfo, from base: URL) async throws -> any LLMClient {
+    func load(_ model: MLXModelInfo, directory base: URL) async throws -> any LLMClient {
         #if targetEnvironment(simulator)
         throw MLXUnsupportedOnSimulator()
         #else
@@ -91,7 +92,7 @@ final class MLXRuntime {
         state = .loading
         let start = ContinuousClock.now
         do {
-            let loaded = try await loader.load(model, from: store.baseDirectory)
+            let loaded = try await loader.load(model, directory: store.baseDirectory)
             guard current == generation else { return }
             client = loaded
             loadedModelID = model.id

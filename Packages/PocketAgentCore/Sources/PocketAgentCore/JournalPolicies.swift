@@ -10,6 +10,11 @@ public enum SummaryPolicy {
 }
 
 public enum DiskSpaceRule {
+    /// Free space needed before downloading a model of `modelBytes`.
+    public static func requiredBytes(modelBytes: Int64) -> Int64 {
+        0 // RED stub
+    }
+
     /// Needs 1.5x the model size free (integer arithmetic).
     public static func canDownload(modelBytes: Int64, freeBytes: Int64) -> Bool {
         freeBytes >= modelBytes + modelBytes / 2

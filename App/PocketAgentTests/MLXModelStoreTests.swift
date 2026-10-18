@@ -3,6 +3,33 @@ import PocketAgentCore
 import Testing
 @testable import PocketAgent
 
+/// One-shot gate that ignores task cancellation (imitates a Hub/MLX call that keeps running).
+final class TestGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow = lock.withLock { () -> Bool in
+                if isOpen { return true }
+                waiters.append(continuation)
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            isOpen = true
+            defer { waiters = [] }
+            return waiters
+        }
+        for waiter in pending { waiter.resume() }
+    }
+}
+
 /// Scripted downloader: reports `steps`, then waits for `release()` (or cancellation).
 final class FakeDownloader: ModelDownloading, @unchecked Sendable {
     enum FakeError: Error { case failed }
@@ -11,27 +38,39 @@ final class FakeDownloader: ModelDownloading, @unchecked Sendable {
     private var downloaded: Set<String>
     private let steps: [Double]
     private let fails: Bool
+    private let ignoresCancellation: Bool
+    private let hold = TestGate()
     private let gate: AsyncStream<Void>
     private let gateContinuation: AsyncStream<Void>.Continuation
     private var _downloadCalls = 0
 
-    init(downloaded: Set<String> = [], steps: [Double] = [0.5], fails: Bool = false) {
+    init(
+        downloaded: Set<String> = [], steps: [Double] = [0.5], fails: Bool = false, ignoresCancellation: Bool = false
+    ) {
         self.downloaded = downloaded
         self.steps = steps
         self.fails = fails
+        self.ignoresCancellation = ignoresCancellation
         (gate, gateContinuation) = AsyncStream<Void>.makeStream()
     }
 
     var downloadCalls: Int { lock.withLock { _downloadCalls } }
 
-    func release() { gateContinuation.yield() }
+    func release() {
+        gateContinuation.yield()
+        hold.open()
+    }
 
     func download(
         _ model: MLXModelInfo, to _: URL, progress: @escaping @Sendable (Double) -> Void
     ) async throws {
         lock.withLock { _downloadCalls += 1 }
         for step in steps { progress(step) }
-        for await _ in gate { break }
+        if ignoresCancellation {
+            await hold.wait()
+        } else {
+            for await _ in gate { break }
+        }
         try Task.checkCancellation()
         if fails { throw FakeError.failed }
         _ = lock.withLock { downloaded.insert(model.id) }
@@ -132,13 +171,45 @@ struct MLXModelStoreTests {
         #expect(try await waitUntil { store.status(of: model) == .downloading(0.5) })
         store.cancelDownload()
         await store.waitForDownload()
-        try await Task.sleep(for: .milliseconds(50))
 
         #expect(store.status(of: model) == .notDownloaded)
         #expect(!downloader.isDownloaded(model, at: store.baseDirectory))
         // A new download can start afterwards.
         #expect(store.startDownload(model, freeBytes: plenty, isExpensiveNetwork: false) == .started)
         store.cancelDownload()
+    }
+
+    @Test func cancelStaysBusyUntilTaskEnds() async throws {
+        let downloader = FakeDownloader(ignoresCancellation: true)
+        let store = makeStore(downloader)
+
+        _ = store.startDownload(model, freeBytes: plenty, isExpensiveNetwork: false)
+        #expect(try await waitUntil { store.status(of: model) == .downloading(0.5) })
+        store.cancelDownload()
+
+        #expect(store.status(of: model) == .notDownloaded)
+        // The cancelled task may still write files: no new download until it ends.
+        #expect(store.startDownload(model, freeBytes: plenty, isExpensiveNetwork: false) == .busy)
+
+        downloader.release()
+        await store.waitForDownload()
+        #expect(store.status(of: model) == .notDownloaded)
+        #expect(store.startDownload(model, freeBytes: plenty, isExpensiveNetwork: false) == .started)
+        store.cancelDownload()
+        await store.waitForDownload()
+    }
+
+    @Test func progressNeverGoesBackwards() async throws {
+        let downloader = FakeDownloader(steps: [0.6, 0.3])
+        let store = makeStore(downloader)
+
+        _ = store.startDownload(model, freeBytes: plenty, isExpensiveNetwork: false)
+        #expect(try await waitUntil { store.status(of: model) != .downloading(0) })
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(store.status(of: model) == .downloading(0.6))
+        store.cancelDownload()
+        await store.waitForDownload()
     }
 
     @Test func deleteResetsStatus() {

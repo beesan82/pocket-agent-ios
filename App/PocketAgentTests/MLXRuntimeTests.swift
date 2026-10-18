@@ -10,17 +10,34 @@ final class FakeLoader: ModelLoading, @unchecked Sendable {
 
     private let lock = NSLock()
     private let fails: Bool
+    private let gated: Bool
+    private let gate = TestGate()
     private var _loads: [String] = []
+    private var _directories: [URL] = []
     private var _releases = 0
 
-    init(fails: Bool = false) { self.fails = fails }
+    /// `gated`: each load waits for `release()` and ignores cancellation (like a long MLX load).
+    init(fails: Bool = false, gated: Bool = false) {
+        self.fails = fails
+        self.gated = gated
+    }
 
     var loads: [String] { lock.withLock { _loads } }
+    var directories: [URL] { lock.withLock { _directories } }
     var releases: Int { lock.withLock { _releases } }
 
-    func load(_ model: MLXModelInfo, from _: URL) async throws -> any LLMClient {
-        lock.withLock { _loads.append(model.id) }
-        try await Task.sleep(for: .milliseconds(20))
+    func release() { gate.open() }
+
+    func load(_ model: MLXModelInfo, directory: URL) async throws -> any LLMClient {
+        lock.withLock {
+            _loads.append(model.id)
+            _directories.append(directory)
+        }
+        if gated {
+            await gate.wait()
+        } else {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         if fails { throw FakeError.failed }
         return FakeLLMClient([])
     }
@@ -31,6 +48,7 @@ final class FakeLoader: ModelLoading, @unchecked Sendable {
 @MainActor
 struct MLXRuntimeTests {
     private let model = MLXModelRegistry.default
+    private let base = FileManager.default.temporaryDirectory.appending(path: "MLXRuntimeTests")
 
     private func makeRuntime(
         _ loader: FakeLoader, center: NotificationCenter = NotificationCenter()
@@ -40,7 +58,7 @@ struct MLXRuntimeTests {
         defaults.removePersistentDomain(forName: name)
         let store = MLXModelStore(
             downloader: FakeDownloader(downloaded: [model.id]),
-            baseDirectory: FileManager.default.temporaryDirectory.appending(path: "MLXRuntimeTests"),
+            baseDirectory: base,
             defaults: defaults)
         return MLXRuntime(store: store, loader: loader, notificationCenter: center)
     }
@@ -62,6 +80,52 @@ struct MLXRuntimeTests {
         // Loading the same model again is a no-op.
         await runtime.load(model)
         #expect(loader.loads == [model.id])
+    }
+
+    @Test func loadUsesLocalModelDirectory() async {
+        let loader = FakeLoader()
+        let runtime = makeRuntime(loader)
+
+        await runtime.load(model)
+
+        #expect(loader.directories == [HubModelDownloader.directory(of: model, at: base)])
+    }
+
+    @Test func concurrentLoadsOfSameModelLoadOnce() async throws {
+        let loader = FakeLoader(gated: true)
+        let runtime = makeRuntime(loader)
+
+        async let first: Void = runtime.load(model)
+        async let second: Void = runtime.load(model)
+        #expect(try await waitUntil { !loader.loads.isEmpty && runtime.state == .loading })
+        try await Task.sleep(for: .milliseconds(50))
+        loader.release()
+        _ = await (first, second)
+
+        #expect(loader.loads.count == 1)
+        #expect(runtime.state == .loaded)
+        #expect(runtime.client != nil)
+    }
+
+    @Test func memoryWarningDuringLoadingDiscardsLateResult() async throws {
+        let center = NotificationCenter()
+        let loader = FakeLoader(gated: true)
+        let runtime = makeRuntime(loader, center: center)
+        let model = model
+
+        let loading = Task { await runtime.load(model) }
+        #expect(try await waitUntil { runtime.state == .loading && !loader.loads.isEmpty })
+        center.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+
+        #expect(runtime.state == .unloadedForMemory)
+        #expect(runtime.client == nil)
+
+        // The load finishes anyway: its result is dropped and its memory released.
+        loader.release()
+        await loading.value
+        #expect(runtime.state == .unloadedForMemory)
+        #expect(runtime.client == nil)
+        #expect(loader.releases == 1)
     }
 
     @Test func loadFailureShowsFixedTextAndNoClient() async {
@@ -135,8 +199,18 @@ struct MLXRuntimeTests {
         #if targetEnvironment(simulator)
         let model = model
         await #expect(throws: MLXUnsupportedOnSimulator.self) {
-            _ = try await MLXModelLoader().load(model, from: FileManager.default.temporaryDirectory)
+            _ = try await MLXModelLoader().load(model, directory: FileManager.default.temporaryDirectory)
         }
         #endif
+    }
+
+    /// Polls on the main actor; returns false on timeout instead of hanging the suite.
+    private func waitUntil(timeout: Duration = .seconds(5), _ condition: () -> Bool) async throws -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while !condition() {
+            if ContinuousClock.now >= deadline { return false }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return true
     }
 }
