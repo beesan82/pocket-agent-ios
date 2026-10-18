@@ -43,9 +43,10 @@
 ## 構成（決定事項）
 
 ### 日誌データ（Core + App）
-- Core: `JournalEntry { id: UUID; createdAt: Date; source: .voice | .text; body: String; transcript: String?; title: String? }`。`body` は表示本文（要約があれば要約、なければ原文）。`transcript` は要約したときの原文。
+- Core: `JournalEntry { id: UUID; createdAt: Date; source: .voice | .text; origin: .journal | .noteTool; body: String; transcript: String?; title: String? }`。`body` は表示本文（要約があれば要約、なければ原文）。`transcript` は要約したときの原文。
 - `protocol JournalStore` : add / all（新しい順）/ search(query) / entries(in: DateInterval) / entry(id:) / delete(id:) / deleteAll。検索は `NoteSearch.matches` を再利用。
-- 既存の `NoteStore`・`NoteTools`・メモ画面は、**日誌ストアの上に載せ替える**（Note = JournalEntry の射影）。Claude チャットのメモツールもそのまま日誌を読む。移行: 既存 `NoteRecord` は起動時に `JournalEntryRecord(source: .text)` へ一度だけコピーして元を削除（件数が少ない前提。失敗時は元を残す）。
+- `JournalEntry` に `origin: .journal | .noteTool` を持たせる。`.journal` は日誌画面（音声・テキスト）から保存したもの、`.noteTool` は Claude チャットの `save_note` が保存したもの。
+- 既存の `NoteStore`・`NoteTools`・メモ画面は、**日誌ストアの上に載せ替える**（Note = JournalEntry の射影）。ただし **Claude のメモツール（list/search/delete）が見るのは `.noteTool` の項目だけ**。`.journal` の本文は Claude に渡さない（アンチゴール「外部へ送られる」と要件 6.3 のため）。MLX の「聞く」は両方を読む。移行: 既存 `NoteRecord` は起動時に `JournalEntryRecord(source: .text, origin: .noteTool)` へ一度だけコピーして元を削除（件数が少ない前提。失敗時は元を残す）。
 - SwiftData: `JournalEntryRecord`。`VersionedSchema` を Phase 2 で導入する（Phase 1 バックログ M6）。
 
 ### 記録フロー（App）
@@ -58,16 +59,26 @@
 - 画面「日誌に聞く」: 質問入力 → 回答（逐次表示）→ **根拠にした日誌**（日付・冒頭）を下に列挙。「停止」。
 - 2 段階パイプライン（Runtime の純粋ロジック + `any LLMClient`）:
   1. **検索条件の抽出**（LLM 1 往復）: 「JSON 配列で検索語だけを出力」。パース失敗・空なら**保険**: 質問文を空白で分割した語 + 質問文そのもの。加えて、質問中の相対日付語（今日／昨日／今週／先週／今月／先月）を Core の純粋関数で `DateInterval` に変換（これは LLM に頼らない）。
-  2. **検索はアプリ側で実行**: 各検索語で `search`（OR で和集合）、日付範囲があれば `entries(in:)` と交差。新しい順、最大 20 件、各件 300 文字まで、合計 3000 文字まで。
+  2. **検索はアプリ側で実行**（純粋関数でテストする）:
+     - 日付範囲が取れたら **母集合 = その範囲の全件**。検索語は母集合を**絞り込むだけ**で、1 件も当たらなければ母集合をそのまま使う（「先週なにしてた？」は範囲全件で答える）。
+     - 日付範囲がなければ、各検索語で `search` した結果の和集合（OR）。
+     - 検索語は LLM の JSON 配列（単語でも句でもよい。各要素をそのまま 1 検索語にする）。保険の検索語は、質問文を空白と句読点（、。？！?!）で分割した断片（2 文字以上）。
+     - それでも 0 件なら **直近 10 件**を母集合にして回答する（回答文の先頭で「直近の日誌から」と断る）。
+     - 新しい順、最大 20 件、各件 300 文字まで、合計 3000 文字まで。
   3. **回答生成**（LLM 1 往復）: 「以下の日誌だけを根拠に日本語で答える。書いていなければ『日誌に記録がありません』と答える」+ 日誌 + 質問。
-- 0 件のときは LLM を呼ばず「該当する日誌がありません」。
+- 日誌が 1 件もないときだけ LLM を呼ばず「日誌がまだありません」。
 
 ### MLX ランタイム（App/Adapters + Runtime）
 - `MLXModelRegistry`（候補一覧）、`MLXModelStore`（ダウンロード・削除・状態。保存先は `Application Support/Models` 配下の `HubApi(downloadBase:)`。進捗は `Progress`。中断はタスクキャンセル）。ダウンロード前の表示: サイズ・ライセンス・「通信が発生します」。空き容量が **サイズ × 1.5 未満なら開始しない**（要件 9.2）。
+- ダウンロードは**フォアグラウンドのみ**（バックグラウンド URLSession や再開対応はこのフェーズでは作らない）。画面を離れてもアプリが前面にある間は続く。中断されると未完了ファイルは最初からになる（完了済みファイルはハッシュ一致で再取得しない）。モバイル回線（`NWPathMonitor` の `isExpensive`）のときは開始前に「Wi-Fi を推奨」を表示して確認する。
 - `MLXRuntime`（`@MainActor @Observable`）: 状態 `notDownloaded / downloading(progress) / ready / loading / loaded / failed(reason)`。`load()` で `loadModelContainer` → `MLXClient(container:model:parameters:)`。`unload()` は参照を捨てて `Memory.clearCache()`。`UIApplication.didReceiveMemoryWarningNotification` で `unload()` し「メモリ不足のためモデルを解放しました」を表示。`Memory.cacheLimit` は読み込み時に控えめ（例 64MB）に設定（builder が実機で調整）。
 - `GenerateParameters`: temperature 0.7、topP 0.8、maxTokens 512（要約）/ 384（回答）、repetitionPenalty 1.1（筆者判断。実機で調整）。
 - 利用可否の理由（`ModelUnavailableReason` を拡張）: シミュレータ、未ダウンロード、読み込み中、空き容量不足、メモリ不足で解放済み、OS 非対応。**MLX は `#if targetEnvironment(simulator)` で完全に迂回**し、CI のシミュレータテストでは「シミュレータでは利用できません」を返す。
 - チャット画面の `ModelChoice`（Claude／Apple）は変更しない。日誌の機能は MLX 専用（Claude で日誌を扱う経路は作らない）。
+
+### 画面構成
+- ルートを `TabView` にする: 「日誌」（記録 + 一覧 + 検索）／「聞く」／「チャット」（既存の会話一覧をそのまま）。「設定」は従来どおり各タブのツールバーから。既存の「メモ」画面は日誌画面に置き換える（`.noteTool` 由来の項目も日誌に表示する）。
+- 音声入力が使えない端末（`SpeechTranscriber.isAvailable == false` または ja-JP 非対応）では録音ボタンを無効にして理由を表示し、テキスト入力だけにする。旧 `SFSpeechRecognizer` への切替はこのフェーズでは作らない（バックログ）。
 
 ### CI
 - 既存のシミュレータ build/test はそのまま（MLX を含めてコンパイルが通ること）。
@@ -75,9 +86,10 @@
 - Codemagic ワークフローは変更なし（手動起動）。
 
 ## Phase 2-0 実機ゲート（作り込みの前に必ず通す）
-1. AgentRunKitMLX をリンクし、モデル管理画面と「読み込んで 3 つのサンプル文（短文・300 字・1000 字）を要約」する検証画面だけを先に TestFlight へ出す。
-2. iPhone 15 で記録する: ダウンロード時間、読み込み時間、トークン/秒（`GenerateCompletionInfo`）、`Memory.activeMemory` と `os_proc_available_memory()`、要約の日本語品質（ユーザーの主観 3 段階）、メモリ警告の有無。
-3. 結果を `docs/phase2-mlx-eval.md` に残し、既定モデルを確定してから G1・G2 を実装する。品質が足りなければ候補を替える。それでも足りなければ、ユーザーに「聞く機能だけ Claude を使う」選択肢を**提案して承認を得る**（勝手に切り替えない）。
+1. AgentRunKitMLX をリンクし、モデル管理画面と検証画面（設定 →「検証」に置き、ゲート後も残す）だけを先に TestFlight へ出す。検証画面の内容: モデルを読み込んで 3 つのサンプル文（短文・300 字・1000 字）を要約／`SpeechTranscriber.isAvailable`・ja-JP 対応・アセット状態の表示と 30 秒の文字起こしテスト。
+2. iPhone 15 でユーザーが記録する: ダウンロード時間、読み込み時間、トークン/秒（`GenerateCompletionInfo`）、`Memory.activeMemory` と `os_proc_available_memory()`、要約の日本語品質（主観 3 段階）、メモリ警告の有無、文字起こしの可否と精度の印象。画面に数値を表示し、ユーザーはそれを読み上げるかスクリーンショットで伝える。
+3. 結果は Claude がユーザーの報告から `docs/phase2-mlx-eval.md` にまとめ、既定モデルを確定する。品質が足りなければ候補を替える。それでも足りなければ、ユーザーに「聞く機能だけ Claude を使う」選択肢を**提案して承認を得る**（勝手に切り替えない）。
+4. **ゲート待ちの間に進めてよい作業**（モデルに依存しない）: 日誌データと `VersionedSchema` 移行、音声入力、Core/Runtime の純粋ロジックと fake による「聞く」パイプライン、画面構成。**モデル固有の調整（プロンプト文言・生成パラメータ・既定モデル）はゲート結果が出てから**確定する。
 
 ## テスト（CI で自動化する範囲）
 - Core: 相対日付語 → `DateInterval`（境界・該当なし）、検索語 JSON のパースと保険、日誌の詰め込み（件数・文字数・合計上限、新しい順）、要約出力の `見出し:` 解析、空き容量ルール、要約自動実行の閾値（200 文字）、`Note ↔ JournalEntry` 射影。
@@ -94,7 +106,11 @@
 - 「聞く」は 2 段階（検索語抽出 → アプリ検索 → 回答）。ツール呼び出しには頼らない。
 - 既定モデルは Qwen2.5-1.5B-Instruct-4bit。実機ゲートの結果で差し替え可。
 - 増量メモリ entitlement は最初は付けない。
-- メモは日誌へ吸収し、既存メモツールは日誌を読む。
+- メモは日誌へ吸収する。ただし Claude のメモツールが読めるのは `save_note` 由来の項目だけ（音声日誌は Claude に渡さない）。
+- 「聞く」は日付範囲が母集合、検索語は絞り込みのみ。0 件なら直近 10 件で答える。
+- ダウンロードはフォアグラウンドのみ、モバイル回線では確認を出す。
+- ルートは 3 タブ（日誌／聞く／チャット）。音声が使えない端末はテキストのみ。
+- 実機ゲートは最初の TestFlight で行い、その間はモデル非依存の実装だけ進める。
 
 ## 参照
 - AgentRunKit 6.1.0 `Sources/AgentRunKitMLX/MLXClient.swift`, `MLXClientTypes.swift`
