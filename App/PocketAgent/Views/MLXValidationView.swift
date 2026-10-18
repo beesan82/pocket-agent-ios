@@ -1,12 +1,14 @@
 import AgentRunKit
 import PocketAgentCore
 import SwiftUI
+import UIKit
 
 /// Phase 2-0 gate: measure the on-device MLX model and Japanese speech input on a real iPhone.
 /// Fixed texts only; underlying errors are never shown.
 struct MLXValidationView: View {
     let store: MLXModelStore
     let runtime: MLXRuntime
+    let measurementLog: MeasurementLog
 
     /// 暫定: interim summary prompt for the gate measurement; the real prompt is decided later.
     static let interimSystemPrompt = """
@@ -52,9 +54,12 @@ struct MLXValidationView: View {
     @State private var summaryMessage: String?
     @State private var speechTask: Task<Void, Never>?
     @State private var speechMessage: String?
+    @State private var copied = false
+    @State private var confirmClear = false
 
     var body: some View {
         Form {
+            logSection
             modelSection
             memorySection
             summarySection
@@ -65,14 +70,56 @@ struct MLXValidationView: View {
             store.refresh()
             refreshMemory()
             await speech.refreshAvailability()
+            measurementLog.append("音声可否: \(speech.reason?.userMessage ?? "利用可能")")
         }
-        .onChange(of: runtime.state) { refreshMemory() }
+        .onChange(of: runtime.state) {
+            refreshMemory()
+            if runtime.state == .unloadedForMemory { measurementLog.append("メモリ警告によりモデルを解放") }
+        }
         .onDisappear {
             summaryTask?.cancel()
             summaryTask = nil
             speechTask?.cancel()
             speechTask = nil
             Task { await speech.stop() }
+        }
+    }
+
+    // MARK: Log
+
+    private var logSection: some View {
+        let text = { measurementLog.render(deviceInfo: DeviceInfo.summary, appVersion: DeviceInfo.appVersion) }
+        return Section {
+            LabeledContent("記録数", value: "\(measurementLog.entries.count) 件")
+            HStack {
+                Button("ログをコピー") {
+                    UIPasteboard.general.string = text()
+                    copied = true
+                }
+                ShareLink(item: text()) { Text("共有") }
+                Button("クリア", role: .destructive) { confirmClear = true }
+            }
+            .buttonStyle(.bordered)
+            if copied {
+                Text("コピーしました").font(.footnote).foregroundStyle(.secondary)
+            }
+            ForEach(measurementLog.entries.suffix(5)) { entry in
+                Text(entry.line)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+        } header: {
+            Text("測定ログ")
+        } footer: {
+            Text("コピーして、そのままチャットへ貼り付けてください。")
+        }
+        .confirmationDialog("ログを消去しますか？", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("クリア", role: .destructive) {
+                measurementLog.clear()
+                copied = false
+            }
+            Button("キャンセル", role: .cancel) {}
         }
     }
 
@@ -96,17 +143,41 @@ struct MLXValidationView: View {
             HStack {
                 Button("読み込む") {
                     let model = store.selected
-                    Task { await runtime.load(model) }
+                    Task { await loadModel(model) }
                 }
                 .disabled(status != .downloaded || runtime.state == .loading || runtime.state == .loaded)
-                Button("解放", role: .destructive) { runtime.unload() }
+                Button("解放", role: .destructive) {
+                    runtime.unload()
+                    measurementLog.append("モデル解放（手動）")
+                }
                     .disabled(runtime.state == .idle)
             }
             .buttonStyle(.bordered)
         }
     }
 
+    private func loadModel(_ model: MLXModelInfo) async {
+        refreshMemory()
+        logMemory("読み込み前")
+        measurementLog.append("モデル読み込み開始: \(model.displayName)")
+        await runtime.load(model)
+        refreshMemory()
+        if runtime.state == .loaded {
+            let seconds = runtime.lastLoadSeconds.map { String(format: "%.1f", $0) } ?? "不明"
+            measurementLog.append("モデル読み込み完了: \(model.displayName) \(seconds) 秒")
+        } else {
+            measurementLog.append("モデル読み込み失敗: \(model.displayName)")
+        }
+        logMemory("読み込み後")
+    }
+
     // MARK: Memory
+
+    private func logMemory(_ label: String) {
+        let active = memory.active.map(DeviceProbes.megabytes) ?? "取得不可"
+        measurementLog.append(
+            "メモリ（\(label)）: MLX active \(active) / 利用可能 \(DeviceProbes.megabytes(memory.available))")
+    }
 
     private var memorySection: some View {
         Section {
@@ -183,6 +254,9 @@ struct MLXValidationView: View {
         summaryTask?.cancel()
         summaryTask = nil
         summaryRun += 1  // a late result of the cancelled run is dropped
+        if let id = runningSampleID, let sample = Self.samples.first(where: { $0.id == id }) {
+            measurementLog.append("要約を停止: \(sample.label)")
+        }
         runningSampleID = nil
     }
 
@@ -219,13 +293,23 @@ struct MLXValidationView: View {
             case let .success(message):
                 let tokens = message.tokenUsage?.output
                 let rate = tokens.flatMap { elapsed > 0 && $0 > 0 ? Double($0) / elapsed : nil }
+                let output = SummaryParser.parse(message.content)
                 result = SummaryResult(
-                    sampleID: sample.id, output: SummaryParser.parse(message.content),
-                    seconds: elapsed, tokensPerSecond: rate)
+                    sampleID: sample.id, output: output, seconds: elapsed, tokensPerSecond: rate)
+                let tokenText = tokens.map { "\($0)" } ?? "不明"
+                let rateText = rate.map { String(format: "%.1f", $0) } ?? "不明"
+                measurementLog.append(
+                    "要約（\(sample.label)・入力\(sample.text.count)字）: 所要 "
+                        + String(format: "%.1f", elapsed)
+                        + " 秒 / 出力 \(tokenText) tokens / \(rateText) tokens/s / 見出し: \(output.title ?? "なし")"
+                        + " / 本文先頭: \(String(output.body.prefix(80)))")
+                measurementLog.append("  > \(output.body)")
             case .failure:
                 summaryMessage = "要約を生成できませんでした。モデルを読み込み直してから、もう一度お試しください。"
+                measurementLog.append("要約失敗: \(sample.label)")
             }
             refreshMemory()
+            logMemory("要約後・\(sample.label)")
         }
     }
 
@@ -251,16 +335,22 @@ struct MLXValidationView: View {
                 Task {
                     await speech.requestPermissions()
                     await speech.refreshAvailability()
+                    measurementLog.append("音声権限確認: \(speech.reason?.userMessage ?? "利用可能")")
                 }
             }
             .disabled(speechBusy)
             Button("アセットを導入") {
                 Task {
+                    let start = ContinuousClock.now
+                    measurementLog.append("音声アセット導入開始")
                     do {
                         try await speech.installAssets()
                         speechMessage = nil
+                        measurementLog.append(
+                            "音声アセット導入完了: " + String(format: "%.1f", Self.seconds(ContinuousClock.now - start)) + " 秒")
                     } catch {
                         speechMessage = SpeechCapture.installFailedText
+                        measurementLog.append("音声アセット導入失敗")
                     }
                 }
             }
@@ -286,8 +376,10 @@ struct MLXValidationView: View {
         speechTask = Task {
             do {
                 try await speech.start()
+                measurementLog.append("音声30秒テスト開始")
             } catch {
                 speechMessage = SpeechCapture.startFailedText
+                measurementLog.append("音声30秒テスト開始失敗")
                 speechTask = nil
                 return
             }
@@ -297,13 +389,27 @@ struct MLXValidationView: View {
             guard !Task.isCancelled else { return }
             await speech.stop()
             speechTask = nil
+            logSpeechResult()
         }
     }
 
     private func stopSpeechTest() {
         speechTask?.cancel()
         speechTask = nil
-        Task { await speech.stop() }
+        Task {
+            await speech.stop()
+            logSpeechResult()
+        }
+    }
+
+    private func logSpeechResult() {
+        measurementLog.append("音声30秒テスト結果: 確定テキスト \(speech.finalText.count) 字")
+        measurementLog.append("  > \(speech.finalText)")
+    }
+
+    private static func seconds(_ duration: Duration) -> Double {
+        let parts = duration.components
+        return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
     }
 
     // MARK: Text

@@ -4,11 +4,13 @@ import SwiftUI
 /// Phase 2: MLX model list — user-initiated download, progress, cancel, delete, selection.
 struct MLXModelsView: View {
     let store: MLXModelStore
+    let measurementLog: MeasurementLog
 
     @State private var probe = NetworkCostProbe()
     @State private var pendingDownload: PendingDownload?
     @State private var pendingDelete: MLXModelInfo?
     @State private var message: String?
+    @State private var downloadStarts: [String: ContinuousClock.Instant] = [:]
 
     private struct PendingDownload: Identifiable {
         let model: MLXModelInfo
@@ -28,6 +30,7 @@ struct MLXModelsView: View {
         }
         .navigationTitle("モデル管理")
         .task { store.refresh() }
+        .onChange(of: statusSnapshot) { old, new in logDownloadTransitions(from: old, to: new) }
         .confirmationDialog(
             "ダウンロードしますか？",
             isPresented: Binding(get: { pendingDownload != nil }, set: { if !$0 { pendingDownload = nil } }),
@@ -45,7 +48,10 @@ struct MLXModelsView: View {
             titleVisibility: .visible,
             presenting: pendingDelete
         ) { model in
-            Button("削除", role: .destructive) { store.delete(model) }
+            Button("削除", role: .destructive) {
+                store.delete(model)
+                measurementLog.append("モデル削除: \(model.displayName)")
+            }
             Button("キャンセル", role: .cancel) {}
         } message: { model in
             Text("\(model.displayName) を端末から削除します。")
@@ -97,7 +103,12 @@ struct MLXModelsView: View {
             case .notDownloaded, .failed:
                 Button("ダウンロード") { prepareDownload(model) }
             case .downloading:
-                Button("中断", role: .destructive) { store.cancelDownload() }
+                Button("中断", role: .destructive) {
+                    store.cancelDownload()
+                    measurementLog.append(
+                        "モデルダウンロード中断: \(model.displayName)" + elapsedText(model))
+                    downloadStarts[model.id] = nil
+                }
             case .downloaded:
                 Button(store.selected == model ? "選択中" : "選択") { store.selected = model }
                     .disabled(store.selected == model)
@@ -119,6 +130,9 @@ struct MLXModelsView: View {
         switch store.startDownload(pending.model, freeBytes: pending.freeBytes, isExpensiveNetwork: false) {
         case .started:
             message = nil
+            downloadStarts[pending.model.id] = ContinuousClock.now
+            measurementLog.append(
+                "モデルダウンロード開始: \(pending.model.displayName) 約 \(Self.megabytes(pending.model.approxBytes))")
         case let .refusedDiskSpace(requiredBytes):
             message = ModelUnavailableReason.insufficientDiskSpace(requiredBytes: requiredBytes).userMessage
         case .needsConfirmation:
@@ -137,6 +151,35 @@ struct MLXModelsView: View {
         ]
         if pending.isExpensive { lines.append("Wi-Fi の利用を推奨します") }
         return lines.joined(separator: "\n")
+    }
+
+    /// Statuses of every model, so `onChange` sees downloading to downloaded / failed.
+    private var statusSnapshot: [MLXModelStore.Status] {
+        MLXModelRegistry.all.map { store.status(of: $0) }
+    }
+
+    private func logDownloadTransitions(from old: [MLXModelStore.Status], to new: [MLXModelStore.Status]) {
+        for (index, model) in MLXModelRegistry.all.enumerated() where index < old.count && index < new.count {
+            guard case .downloading = old[index] else { continue }
+            switch new[index] {
+            case .downloaded:
+                measurementLog.append(
+                    "モデルダウンロード完了: \(model.displayName) \(Self.megabytes(model.approxBytes))"
+                        + elapsedText(model))
+                downloadStarts[model.id] = nil
+            case .failed:
+                measurementLog.append("モデルダウンロード失敗: \(model.displayName)" + elapsedText(model))
+                downloadStarts[model.id] = nil
+            case .notDownloaded, .downloading:
+                break
+            }
+        }
+    }
+
+    private func elapsedText(_ model: MLXModelInfo) -> String {
+        guard let start = downloadStarts[model.id] else { return "" }
+        let parts = (ContinuousClock.now - start).components
+        return String(format: " / 経過 %.0f 秒", Double(parts.seconds) + Double(parts.attoseconds) / 1e18)
     }
 
     private static func megabytes(_ bytes: Int64) -> String {

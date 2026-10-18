@@ -9,6 +9,7 @@ struct ConversationListView: View {
     let availability: any ModelAvailabilityChecking
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
+    let measurementLog: MeasurementLog
 
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ConversationRecord.updatedAt, order: .reverse) private var conversations: [ConversationRecord]
@@ -54,7 +55,7 @@ struct ConversationListView: View {
                 NavigationLink {
                     SettingsView(
                         settings: settings, credentials: credentials, availability: availability,
-                        mlxStore: mlxStore, mlxRuntime: mlxRuntime)
+                        mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog)
                 } label: {
                     Text("設定")
                 }

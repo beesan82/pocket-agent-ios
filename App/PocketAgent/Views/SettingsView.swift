@@ -9,6 +9,7 @@ struct SettingsView: View {
     let availability: any ModelAvailabilityChecking
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
+    let measurementLog: MeasurementLog
 
     @Environment(\.modelContext) private var modelContext
     @State private var confirmErase = false
@@ -77,10 +78,10 @@ struct SettingsView: View {
 
             Section("端末内モデル（MLX）") {
                 NavigationLink("モデル管理") {
-                    MLXModelsView(store: mlxStore)
+                    MLXModelsView(store: mlxStore, measurementLog: measurementLog)
                 }
                 NavigationLink("MLX 検証（実機ゲート）") {
-                    MLXValidationView(store: mlxStore, runtime: mlxRuntime)
+                    MLXValidationView(store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog)
                 }
             }
 

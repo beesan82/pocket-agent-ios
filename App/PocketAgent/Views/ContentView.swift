@@ -8,6 +8,7 @@ struct ContentView: View {
     let availability: any ModelAvailabilityChecking
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
+    let measurementLog: MeasurementLog
 
     @State private var path = NavigationPath()
 
@@ -15,7 +16,7 @@ struct ContentView: View {
         NavigationStack(path: $path) {
             ConversationListView(
                 path: $path, settings: settings, credentials: credentials, availability: availability,
-                mlxStore: mlxStore, mlxRuntime: mlxRuntime)
+                mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog)
         }
     }
 }
