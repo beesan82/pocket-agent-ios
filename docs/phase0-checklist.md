@@ -24,8 +24,9 @@
 - [x] CI で上記がビルドでき、`SDKLinkCheckTests` が通ることを確認（commit `cc13b32`）
 
 ## 0-4 FakeLLM
-- [ ] `AgentRunKitTesting.TestLLMClient` の API をソースで確認
-- [ ] ツール呼び出し・承認拒否・キャンセル・反復上限のテスト（AT-05, 08, 09 の土台）
+- [x] `AgentRunKitTesting.TestLLMClient` の API をソースで確認 → 台本どおりの応答を返せないので不採用（ADR-007）
+- [~] 自前 FakeLLM `ScriptedLLMClient` + `AgentRunner`（`Packages/PocketAgentRuntime`）
+- [~] ツール呼び出し・承認拒否・セッション承認の格下げ・キャンセル・反復上限のテスト（AT-05, 08, 09 の土台）— CI 未実行
 
 ## 0-5 モデル経路 1 往復
 - [ ] ClaudeAdapter: 実 API キー（Keychain 入力）で 1 往復 — 実機

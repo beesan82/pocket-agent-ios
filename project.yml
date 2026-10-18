@@ -18,6 +18,8 @@ packages:
     exactVersion: 6.1.0
   PocketAgentCore:
     path: Packages/PocketAgentCore
+  PocketAgentRuntime:
+    path: Packages/PocketAgentRuntime
 
 targets:
   PocketAgent:
@@ -27,6 +29,7 @@ targets:
       - App/PocketAgent
     dependencies:
       - package: PocketAgentCore
+      - package: PocketAgentRuntime
       - package: AgentRunKit
         product: AgentRunKit
       - package: AgentRunKit

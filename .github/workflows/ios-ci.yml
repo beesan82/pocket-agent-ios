@@ -1,8 +1,17 @@
 name: iOS CI
 
+# macOS runner minutes are billed at a multiplier on private repos:
+# run only for main / PRs, and skip docs-only changes.
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
 
 permissions:
@@ -27,6 +36,10 @@ jobs:
 
       - name: Core package tests
         working-directory: Packages/PocketAgentCore
+        run: swift test
+
+      - name: Runtime package tests (FakeLLM, AT-05/08/09)
+        working-directory: Packages/PocketAgentRuntime
         run: swift test
 
       - name: Generate Xcode project
