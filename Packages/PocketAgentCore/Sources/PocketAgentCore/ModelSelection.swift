@@ -20,6 +20,11 @@ public enum ModelUnavailableReason: Sendable, Equatable {
     case appleIntelligenceNotEnabled
     case modelNotReady
     case unsupportedOS
+    case simulatorUnsupported
+    case modelNotDownloaded
+    case modelLoading
+    case insufficientDiskSpace(requiredBytes: Int64)
+    case unloadedForMemory
     case unknown(String)
 
     public var userMessage: String {
@@ -34,6 +39,8 @@ public enum ModelUnavailableReason: Sendable, Equatable {
             "端末内モデルを準備中です（ダウンロード中など）。しばらくしてから再試行してください。"
         case .unsupportedOS:
             "このiOSバージョンでは端末内モデルを利用できません。"
+        case .simulatorUnsupported, .modelNotDownloaded, .modelLoading, .insufficientDiskSpace, .unloadedForMemory:
+            ""
         case let .unknown(detail):
             "端末内モデルを利用できません（\(detail)）。"
         }

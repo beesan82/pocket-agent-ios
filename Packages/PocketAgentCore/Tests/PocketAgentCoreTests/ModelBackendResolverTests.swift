@@ -171,10 +171,23 @@ struct ModelBackendResolverTests {
 
     @Test(arguments: [
         ModelUnavailableReason.missingAPIKey, .deviceNotEligible, .appleIntelligenceNotEnabled,
-        .modelNotReady, .unsupportedOS, .unknown("x")
+        .modelNotReady, .unsupportedOS, .unknown("x"),
+        .simulatorUnsupported, .modelNotDownloaded, .modelLoading,
+        .insufficientDiskSpace(requiredBytes: 1_000_000_000), .unloadedForMemory
     ])
     func everyReasonExplainsItself(reason: ModelUnavailableReason) {
         #expect(!reason.userMessage.isEmpty)
+    }
+
+    @Test func newReasonsExplainThemselves() {
+        #expect(ModelUnavailableReason.simulatorUnsupported.userMessage == "シミュレータでは端末内モデルを利用できません")
+        #expect(ModelUnavailableReason.modelNotDownloaded.userMessage
+            == "モデルが未ダウンロードです。設定のモデル管理からダウンロードしてください")
+        #expect(ModelUnavailableReason.modelLoading.userMessage == "モデルを読み込み中です")
+        #expect(ModelUnavailableReason.insufficientDiskSpace(requiredBytes: 1_300_000_000).userMessage
+            == "空き容量が不足しています（必要: 約 1.3 GB）")
+        #expect(ModelUnavailableReason.unloadedForMemory.userMessage
+            == "メモリ不足のためモデルを解放しました。もう一度読み込んでください")
     }
 
     @Test func choicePersistsAsStableRawValues() {
