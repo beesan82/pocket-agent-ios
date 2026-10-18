@@ -25,8 +25,9 @@
 
 ## 0-4 FakeLLM
 - [x] `AgentRunKitTesting.TestLLMClient` の API をソースで確認 → 台本どおりの応答を返せないので不採用（ADR-007）
-- [~] 自前 FakeLLM `ScriptedLLMClient` + `AgentRunner`（`Packages/PocketAgentRuntime`）
-- [~] ツール呼び出し・承認拒否・セッション承認の格下げ・キャンセル・反復上限のテスト（AT-05, 08, 09 の土台）— CI 未実行
+- [x] 自前 FakeLLM `ScriptedLLMClient` + `AgentRunner`（`Packages/PocketAgentRuntime`）
+- [x] ツール呼び出し・承認拒否・セッション承認の格下げ・キャンセル・反復上限のテスト（AT-05, 08, 09 の土台）— CI run 39098564327 で 9/9 合格（`swift test`, macOS）
+- [ ] アプリ全体（Xcode）のビルドに PocketAgentRuntime を含めて成功 — 同 run は Package.resolved の表示ステップで停止し未確認
 
 ## 0-5 モデル経路 1 往復
 - [ ] ClaudeAdapter: 実 API キー（Keychain 入力）で 1 往復 — 実機
