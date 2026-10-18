@@ -48,3 +48,43 @@
 - Apple Intelligence 対応 iPhone の有無（要件15章で未確認）
 - Anthropic API キー（ユーザーが端末上で入力。チャットやリポジトリに貼らない）
 - AgentRunKit がビルド不能な場合: 「薄い独自 Agent Runtime + Apple Foundation Models」を代替案として提示し、**承認を得てから**切り替える
+
+## Phase 1（プレーン版）: チャット・メモ・LINE返信
+設計: `docs/superpowers/specs/2026-10-18-phase1-chat-memo-line-design.md` / 計画: `docs/superpowers/plans/2026-10-18-phase1-chat-memo-line.md`
+最終 CI: run 39114462235（commit `2f6077e`）— Core 31 / Runtime 54 / App 37 テスト合格、ビルド成功。
+
+### 実装済み（CI で自動テスト合格。いずれも実機では未確認）
+- [x] Task 1 メモ（`Note` / `NoteStore` / `InMemoryNoteStore`、`appInternalDelete`）— `bb5209f..7b64ac7`、RED 39108346748 / GREEN 39108395807
+- [x] Task 2 `ShareFlow`（送信完了状態なし、AT-07）— `..763732d`、RED 39108702446 / GREEN 39108753238
+- [x] Task 3 `ConversationApprovals`（会話単位の許可、ADR-013）— `..8b97846`、RED 39109080032 / GREEN 39109172255
+- [x] Task 4 メモツール 4 種（ADR-014）— `..42e3b38`、RED 39109560120 / GREEN 39109697611
+- [x] Task 5 `ConversationContext`（履歴の上限・システムプロンプト）— `..3c14c25`、RED 39110047063, 39110149495 / GREEN 39110240692
+- [x] Task 6 SwiftData 永続化（会話・メモ・全削除）— `..e625472`、RED 39110953066 / GREEN 39111458131
+- [x] Task 7 `ChatSession` / `ApprovalBroker`（承認の直列化）— `..1f41596`、RED 39112006112 / GREEN 39112331406
+- [x] Task 8 画面一式（会話一覧・チャット・承認・返答操作・メモ・設定）— `..1620625`、レビュー修正後 CI 39113298313
+- [x] 最終レビュー修正（C1 Apple 畳み込みプロンプト、I1 id 指定の拒否、I2 LINE ダイアログ、I4 バナー文言、M1〜M3）— `1620625..2f6077e`、RED 39114116464, 39114202188 / GREEN 39114462235
+- [x] ADR-013〜019 を `docs/decisions.md` に記録。逐次表示は未実装（ADR-015、FR-01 からの意図的な逸脱）
+
+### 実機で未検証
+- [ ] 貼り付け → 下書き → 「LINEで共有」→ LINE の共有先選択画面。ダイアログの表示順で LINE が確実に開くか（I2: キャンセル役ボタンが外側タップでも発火するか）
+- [ ] メモを保存 → 後日チャットで尋ねて答えるか
+- [ ] Apple ローカルでの複数ターンとツール呼び出し（畳み込みプロンプトは fake でのみ確認、ADR-017）
+- [ ] 機内モード（AT-02 / AT-14）
+- [ ] 承認シートが連続して出るか、シートの再表示のちらつき（I1: 下スワイプ後、`onDisappear` の拒否までの間に再提示されないか）
+- [ ] 承認シート表示中の停止、および FoundationModels がキャンセルをツール承認待ちへ伝えるか
+- [ ] `FMSchemaConverter` が引数なしの `list_notes` スキーマ（空オブジェクト）を受け付けるか
+- [ ] CoreData のサンドボックス警告 / 初回起動時のストア作成
+
+### バックログ（Phase 1 で見送った小さな問題）
+- `NoteSearch` が `localizedStandardContains`（ロケール依存）に依存。SwiftData 側は `NoteSearch.matches` を再利用する方針
+- `ShareFlow`: 文面なしの文言 `共有する文面がありません` が 2 か所に重複。`didOpen` の確認中以外での無視や任意状態からの request/cancel のテストなし
+- 初回の承認が同一ツールで並行すると両方出る（`ApprovalBroker` の直列化で緩和済み）。名前キーのストアをリスク判定より先に参照
+- `NoteTools`: 件数のみの切り詰めテストなし、`deleteAsksEveryTimeOnBothPaths` が両経路を 1 件に統合、スキーマ形状のアサーションなし
+- `ConversationContext`: 後で落とされる先頭のアシスタント文も文字数予算に数える。`ConversationContextTests.swift:155` のコメントが紛らわしい
+- `SwiftDataNoteStore`: `createdAt` 同値時の順序が fetch 順に依存。`eraseAll` 失敗の集約が未テスト。不明な `roleRaw` は黙って捨てる。保存失敗時のロールバック（M3）は自動テストなし
+- キュー中の承認要求のキャンセル経路が未テスト
+- 「全データ削除」が `ModelSettings` をリセットしない（ダイアログは「すべて」と表示）
+- `ChatView` の `ForEach` がオフセットをキーにしている
+- 承認シートのボタンは `broker.answer`（id 指定でない）。二重タップが次の要求に答える恐れ。`answer(id:_:)` 化が必要
+- Apple の畳み込みプロンプトは履歴だけを予算化し、今回のメッセージで 4000 文字を超え得る（文脈超過の文言で対処）
+- 「（空の応答）」のプレースホルダ ターンが履歴として再送される

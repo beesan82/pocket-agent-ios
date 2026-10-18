@@ -77,6 +77,56 @@
 - 理由: 無署名（`CODE_SIGNING_ALLOWED=NO`）では Keychain が `errSecMissingEntitlement`(-34018) を返した（run 39100885741）。アドホック署名で合格（run 39101123691）。証明書・Team ID・シークレットは不要。
 - 状態: 採用
 
+## ADR-013 「この会話では許可」は ChatSession の寿命で有効（Runtime の `ConversationApprovals`）
+- 決定: 会話単位の許可ストア `ConversationApprovals`（actor）でユーザーの `ApprovalHandler` を包み、`AgentRunner` と `ToolApprovalGate` の両経路に同じハンドラとして渡す。許可済みツールはダイアログなしで `.approveOnce` を返す。`delete_note`（`appInternalDelete`）と外部副作用ツールは許可を受け付けず毎回確認する。
+- 理由: AgentRunKit 6.1.0 の `.approveAlways` は `run` 1 回ごとにリセットされる（`AgentLoopState.sessionAllowlist`、ソース確認済み）ため SDK には頼れない。
+- 範囲の縮小（最終レビュー I3 への裁定）: 当初設計は「会話全体（再オープン・モデル切替をまたぐ）」だったが、実装は `ChatSession` が生きている間（チャット画面を開いている間）に限る。画面を離れると許可はリセットされ、再び聞かれる。モデル切替をまたぐ保持は `sessionApprovalSurvivesModelSwitch` で確認（チャット画面を開いたままの切替）。会話を開き直すたびの再確認が煩わしければ実機で見直す。
+- 安全側: 範囲が狭いほど確認が増えるだけで、承認なしの副作用は増えない。ナビゲーション横断のレジストリを避けられる。
+- 影響要件: FR-05, AT-05, AT-08
+- 状態: 採用（Unit 合格・CI run 39114462235。実機未検証）
+
+## ADR-014 メモツールは `ToolResult.error` を返し throw しない
+- 決定: `save_note` / `list_notes` / `search_notes` / `delete_note` は、引数不正・ストア失敗・未知の id のいずれも `ToolResult.error` で返し、例外を投げない。
+- 理由（v6.1.0 ソースで確認）: `FMToolAdapter` は `execute` の例外を再 throw し、FoundationModels のセッション全体が止まる。エラーはモデルへの結果として返すほうが会話を続けられる。
+- 検証: `NoteToolsTests.invalidArgumentsNeverTouchStore` / `unknownIdIsReportedNotThrown` / `storeErrorsBecomeToolErrors`（CI run 39109697611、最終 39114462235）。
+- 影響要件: FR-04, AT-05
+- 状態: 採用
+
+## ADR-015 逐次（ストリーミング）表示を後回し（FR-01 からの意図的な逸脱）
+- 決定: Phase 1（プレーン版）では返答をまとめて表示する。
+- 理由: 最小の土台で使い方を探すことを優先（設計「非ゴール」）。生成中は進行表示と停止ボタンのみ。
+- 影響要件: FR-01（Must のため未達として扱う。次版で実装）
+- 状態: 暫定（次版で解消）
+
+## ADR-016 LINE 共有は画面のボタンのみ（ツールにしない）、AT-07 に「送信済み」状態は存在しない
+- 決定: 共有は各アシスタント返答の「LINEで共有」ボタン → 確認ダイアログ → `LineShareURLBuilder` の URL を `openURL`。エージェントが共有を起動するツールは作らない。Core の `ShareFlow` に「送信済み」にあたる状態は持たず、表示は「LINEの共有画面を開きました（送信は未確認）」まで。
+- 理由: 共有先選択画面を開くことと送信完了は別（CLAUDE.md）。貼り付け文に含まれる指示で共有が起動しない（要件9.1）。
+- 検証: `ShareFlowTests.openedMessageNeverClaimsSent` / `confirmOnlyWhileConfirming` / `failedOpenIsReported` ほか（CI run 39108753238、最終 39114462235）。実機の画面遷移は未検証。
+- 影響要件: FR-07, FR-08, US-01, AT-06, AT-07
+- 状態: 採用
+
+## ADR-017 Apple 端末内モデルは AgentRunKit 6.1.0 ではシングルターン。履歴は 1 つのプロンプトへ畳む
+- 決定: Apple 経路は `ConversationContext.appleLocalPrompt(history:message:budget:)` で履歴を「これまでの会話: … / 今回のメッセージ: …」として 1 つの user メッセージに畳み、`history: []` で `run` する。システムプロンプトは唯一の `.system` メッセージとして渡し、貼り付けテキストは instructions に入れない（信頼できない入力）。Claude 経路は従来どおり構造化 history。
+- 理由（v6.1.0 `FMMessageMapper.swift` で確認）: 先頭の `.system` と非空の `.user` ちょうど 1 件のみ許可され、`.assistant` / `.tool` は `featureUnsupported`。畳まないと 2 ターン目から失敗する。
+- 経緯: 最終レビュー（C1）で発見。テストの fake（`FakeLLMClient.foundationModelsContract`）が mapper の制約を再現するようになった。
+- 検証: `ConversationContextTests.appleLocalPrompt*`、`ChatSessionTests.appleLocalSecondTurnSendsOneFoldedPrompt`（CI run 39114462235）。実際の Foundation Models に対する複数ターンは実機未検証。
+- 影響要件: FR-02, US-03, AT-02, AT-14
+- 状態: 採用（実機未検証）
+
+## ADR-018 RED/GREEN コミットを main へ直接 push（計画の一時ブランチ案からの逸脱）
+- 決定: TDD の RED コミットと GREEN コミットをいずれも main へ直接 push し、RED は CI 実行の完了を待って失敗理由（アサーション失敗、コンパイルエラーでない）を確認した。
+- 理由: ユーザーが main への push を事前承認済みで、CI は main への push でのみ自動実行される。一時ブランチ案はこの環境では手間が増える。
+- 影響: RED の間 main の CI が一時的に赤くなる（各タスク約 2 回）。コミット履歴に RED が残る。
+- 影響要件: プロセス（CLAUDE.md 開発順序 4）
+- 状態: 採用
+
+## ADR-019 会話履歴にはユーザーとアシスタントのテキストだけを保存（ツール結果は保存しない）
+- 決定: `TurnRecord` は user / assistant のテキストのみ。ツール呼び出しと結果は保存せず、次ターンの履歴にも含めない。
+- 理由: プレーン版で素朴に保つ。Apple 経路は履歴をテキストに畳むためツール結果を渡せない（ADR-017）。メモは `list_notes` で再取得できる。
+- 影響: FR-10 の「ツール実行結果」の保存を、プレーン版では意図的に狭めた逸脱。
+- 影響要件: FR-10, AT-10
+- 状態: 暫定（使い方次第で見直し）
+
 ## 未決定
-- 永続化: SwiftData 優先（要件15章）。Phase 1 冒頭で決定。
+- 永続化: SwiftData を Phase 1 で採用（設計書）。
 - Bundle ID / Team ID: 未定。現在はプレースホルダ `com.example.pocketagent`。
