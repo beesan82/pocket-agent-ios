@@ -1,4 +1,5 @@
 import PocketAgentCore
+import SwiftData
 import SwiftUI
 
 /// FR-02 / FR-03: model choice, Claude API key (Keychain only), Apple on-device availability.
@@ -7,6 +8,9 @@ struct SettingsView: View {
     let credentials: any CredentialStore
     let availability: any ModelAvailabilityChecking
 
+    @Environment(\.modelContext) private var modelContext
+    @State private var confirmErase = false
+    @State private var eraseStatus: String?
     @State private var keyInput = ""
     @State private var hasKey = false
     @State private var keyStatus: String?
@@ -62,9 +66,46 @@ struct SettingsView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
+
+            Section("検証") {
+                NavigationLink("1往復テスト（実機検証用）") {
+                    RoundTripView(settings: settings, credentials: credentials, availability: availability)
+                }
+            }
+
+            Section("データ") {
+                Button("全データ削除", role: .destructive) { confirmErase = true }
+                if let eraseStatus {
+                    Text(eraseStatus).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+
+            Section("ビルド情報") {
+                LabeledContent("AgentRunKit", value: SDKLinkCheck.agentRunKitLinked ? "リンク済み" : "未リンク")
+                LabeledContent("Claude API ホスト", value: SDKLinkCheck.anthropicHost)
+            }
         }
         .navigationTitle("設定")
+        .confirmationDialog(
+            "会話・メモ・APIキーをすべて削除します", isPresented: $confirmErase, titleVisibility: .visible
+        ) {
+            Button("全データ削除", role: .destructive) { Task { await eraseAll() } }
+            Button("キャンセル", role: .cancel) {}
+        }
         .task { refresh() }
+    }
+
+    private func eraseAll() async {
+        do {
+            try await DataReset.eraseAll(
+                context: modelContext,
+                notes: SwiftDataNoteStore(modelContainer: modelContext.container),
+                credentials: credentials)
+            eraseStatus = "すべてのデータを削除しました"
+        } catch {
+            eraseStatus = "削除を完了できませんでした。もう一度お試しください"
+        }
+        refresh()
     }
 
     private func refresh() {
