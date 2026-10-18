@@ -12,7 +12,7 @@ actor SwiftDataNoteStore: NoteStore {
     }
 
     func all() async throws -> [Note] {
-        try newestFirst(try modelContext.fetch(FetchDescriptor<NoteRecord>()))
+        newestFirst(try modelContext.fetch(FetchDescriptor<NoteRecord>()))
     }
 
     /// Filters with `NoteSearch.matches` so results match the in-memory store exactly.
