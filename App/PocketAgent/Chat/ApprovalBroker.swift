@@ -58,6 +58,8 @@ final class ApprovalBroker {
         resolve(id: active.id, with: decision)
     }
 
+    func deny(id: UUID) {}
+
     /// Resumes the active request only if it is still the one identified by `id`.
     private func resolve(id: UUID, with decision: UserApprovalDecision) {
         guard let current = active, current.id == id else { return }

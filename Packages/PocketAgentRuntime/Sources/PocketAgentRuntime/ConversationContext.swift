@@ -44,4 +44,10 @@ public enum ConversationContext {
             }
         }
     }
+
+    public static func appleLocalPrompt(
+        history turns: [ChatTurn], message: String, budget: HistoryBudget = .appleLocal
+    ) -> String {
+        message
+    }
 }

@@ -11,6 +11,8 @@ import Testing
 /// AgentRunKit 6.1.0 ends a run on plain text only for its own client types, so every
 /// script ends with the reserved `finish` tool. `.runOwnTool` imitates
 /// `FoundationModelsClient`, which executes its own tools inside `generate`.
+/// With `foundationModelsContract`, requests are checked like AgentRunKit 6.1.0's
+/// `FMMessageMapper`: leading system messages plus exactly one non-blank user message.
 final class FakeLLMClient: LLMClient {
     enum Step: Sendable {
         case callTool(name: String, arguments: String)
@@ -22,17 +24,22 @@ final class FakeLLMClient: LLMClient {
         case scriptExhausted
         case unknownOwnTool
         case streamingNotScripted
+        case unsupportedMapping
     }
 
     let providerIdentifier: ProviderIdentifier = .custom("fake-llm")
 
     private let steps: [Step]
     private let ownTools: [any AnyTool<EmptyContext>]
+    private let foundationModelsContract: Bool
     private let recorder = FakeRecorder()
 
-    init(_ steps: [Step], ownTools: [any AnyTool<EmptyContext>] = []) {
+    init(
+        _ steps: [Step], ownTools: [any AnyTool<EmptyContext>] = [], foundationModelsContract: Bool = false
+    ) {
         self.steps = steps
         self.ownTools = ownTools
+        self.foundationModelsContract = foundationModelsContract
     }
 
     var requests: [[ChatMessage]] {
@@ -46,6 +53,7 @@ final class FakeLLMClient: LLMClient {
         requestContext _: RequestContext?
     ) async throws -> AssistantMessage {
         let index = await recorder.record(messages)
+        if foundationModelsContract { try Self.checkFoundationModelsMapping(messages) }
         guard index < steps.count else { throw FakeError.scriptExhausted }
         let callID = "call_\(index)"
         switch steps[index] {
@@ -66,6 +74,35 @@ final class FakeLLMClient: LLMClient {
         requestContext _: RequestContext?
     ) -> AsyncThrowingStream<StreamDelta, Error> {
         AsyncThrowingStream { $0.finish(throwing: FakeError.streamingNotScripted) }
+    }
+
+    /// Mirrors `FMMessageMapper.map`: throws where the real on-device client would.
+    private static func checkFoundationModelsMapping(_ messages: [ChatMessage]) throws {
+        var sawUser = false
+        func acceptUser(_ text: String) throws {
+            guard !sawUser, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw FakeError.unsupportedMapping
+            }
+            sawUser = true
+        }
+        for message in messages {
+            switch message {
+            case .system:
+                guard !sawUser else { throw FakeError.unsupportedMapping }
+            case let .user(text):
+                try acceptUser(text)
+            case let .userMultimodal(parts):
+                let texts = try parts.map { part throws -> String in
+                    guard case let .text(text) = part else { throw FakeError.unsupportedMapping }
+                    return text
+                }
+                try acceptUser(texts.joined(separator: "
+"))
+            case .assistant, .tool:
+                throw FakeError.unsupportedMapping
+            }
+        }
+        guard sawUser else { throw FakeError.unsupportedMapping }
     }
 
     private static func finish(_ callID: String, content: String) -> AssistantMessage {
@@ -219,7 +256,7 @@ struct ChatSessionTests {
             case .appleLocal:
                 FakeLLMClient(
                     [.runOwnTool(name: NoteToolName.save, arguments: Self.json(["text": "二つ目"]))],
-                    ownTools: appleLocalTools)
+                    ownTools: appleLocalTools, foundationModelsContract: true)
             }
             return .success(client)
         }
@@ -237,6 +274,36 @@ struct ChatSessionTests {
         #expect(session.status == .idle)
         #expect(Set(try await notes.all().map(\.text)) == ["一つ目", "二つ目"])
         #expect(session.turns.count == 4)
+    }
+
+    // C1: the on-device client takes one prompt, so turn 2 must not replay history as messages.
+    @Test func appleLocalSecondTurnSendsOneFoldedPrompt() async throws {
+        settings.choice = .appleLocal
+        let conversation = try repository.create(choice: .appleLocal)
+        let fake = FakeLLMClient([.finish("一回目の答え"), .finish("二回目の答え")], foundationModelsContract: true)
+        let session = makeSession(conversation) { _, _ in .success(fake) }
+
+        session.send("一回目")
+        #expect(try await waitUntil { session.status != .running })
+        #expect(session.status == .idle)
+        session.send("二回目")
+        #expect(try await waitUntil { session.status != .running })
+
+        #expect(session.status == .idle)
+        #expect(session.turns.count == 4)
+        let requests = await fake.requests
+        #expect(requests.count == 2)
+        let second = try #require(requests.last)
+        #expect(second.count == 2)
+        #expect(second.first == .system(ConversationContext.systemPrompt))
+        let expected = ConversationContext.appleLocalPrompt(
+            history: [ChatTurn(role: .user, text: "一回目"), ChatTurn(role: .assistant, text: "一回目の答え")],
+            message: "二回目")
+        #expect(second.last == .user(expected))
+        guard case let .user(prompt) = second.last else { return }
+        #expect(prompt.contains("一回目の答え"))
+        #expect(prompt.hasSuffix("二回目"))
+        #expect(prompt != "二回目")
     }
 
     @Test func approvalSummaries() async throws {
@@ -321,5 +388,38 @@ struct ApprovalBrokerTests {
         broker.answer(.deny(reason: nil))
         #expect(await second.value == .deny(reason: nil))
         #expect(broker.pending == nil)
+    }
+
+    // I1: closing A's sheet must never deny a successor request B.
+    @Test func denyByIDResolvesOnlyThatRequest() async throws {
+        let broker = ApprovalBroker()
+        let first = Task { await broker.ask(Self.request, summary: "一つ目") }
+        #expect(try await waitUntil { broker.pending != nil })
+        let firstID = try #require(broker.pending?.id)
+        broker.answer(.approveOnce)
+        #expect(await first.value == .approveOnce)
+
+        let second = Task { await broker.ask(Self.request, summary: "二つ目") }
+        #expect(try await waitUntil { broker.pending != nil })
+        let secondID = try #require(broker.pending?.id)
+
+        broker.deny(id: firstID) // already answered: no-op
+        broker.deny(id: UUID()) // never asked: no-op
+        #expect(broker.pending?.id == secondID)
+
+        broker.deny(id: secondID)
+        let resolved = broker.pending == nil
+        #expect(resolved)
+        if !resolved { broker.answer(.approveOnce) } // never leave the task hanging
+        #expect(await second.value == .deny(reason: nil))
+    }
+}
+
+@MainActor
+struct RunFailureTextTests {
+    // M2: the model's finish reason is never shown.
+    @Test func endedEarlyShowsFixedText() {
+        let text = RunFailureText.message(for: .endedEarly(reason: "provider body", content: "partial"))
+        #expect(text == "応答が途中で終了しました")
     }
 }
