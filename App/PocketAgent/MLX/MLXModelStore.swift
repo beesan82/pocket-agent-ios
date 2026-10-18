@@ -100,7 +100,9 @@ final class MLXModelStore {
     private var statuses: [String: Status] = [:]
     @ObservationIgnored private let downloader: any ModelDownloading
     @ObservationIgnored private let defaults: UserDefaults
+    /// Kept until the task really ends, even after cancel (Hub may still be writing).
     @ObservationIgnored private var activeTask: Task<Void, Never>?
+    /// Model whose status the running download owns; nil once cancelled.
     @ObservationIgnored private var activeModelID: String?
     @ObservationIgnored private var activeToken: UUID?
 
@@ -133,7 +135,7 @@ final class MLXModelStore {
     ) -> StartResult {
         guard activeTask == nil else { return .busy }
         guard DiskSpaceRule.canDownload(modelBytes: model.approxBytes, freeBytes: freeBytes) else {
-            return .refusedDiskSpace(requiredBytes: model.approxBytes + model.approxBytes / 2)
+            return .refusedDiskSpace(requiredBytes: DiskSpaceRule.requiredBytes(modelBytes: model.approxBytes))
         }
         if isExpensiveNetwork && !confirmed { return .needsConfirmation }
 
@@ -159,15 +161,13 @@ final class MLXModelStore {
         return .started
     }
 
+    /// Stops the download. The store stays `.busy` until the cancelled task has ended.
     func cancelDownload() {
-        guard let task = activeTask, let modelID = activeModelID else { return }
-        task.cancel()
-        clearActive()
-        if let model = MLXModelRegistry.model(id: modelID) {
-            statuses[modelID] = downloader.isDownloaded(model, at: baseDirectory) ? .downloaded : .notDownloaded
-        } else {
-            statuses[modelID] = .notDownloaded
-        }
+        guard activeTask != nil, let modelID = activeModelID else { return }
+        activeTask?.cancel()
+        activeModelID = nil
+        activeToken = nil
+        statuses[modelID] = diskStatus(of: modelID)
     }
 
     func delete(_ model: MLXModelInfo) {
@@ -180,20 +180,26 @@ final class MLXModelStore {
         }
     }
 
-    /// Test hook: waits for the current download task (if any) to end.
+    /// Waits until the current (or cancelled) download task has ended.
     func waitForDownload() async {
         await activeTask?.value
     }
 
     private func applyProgress(_ value: Double, token: UUID, modelID: String) {
-        guard activeToken == token, case .downloading = statuses[modelID] else { return }
-        statuses[modelID] = .downloading(min(max(value, 0), 1))
+        // Callbacks may arrive out of order: never move backwards.
+        guard activeToken == token, case let .downloading(current) = statuses[modelID] else { return }
+        statuses[modelID] = .downloading(max(current, min(max(value, 0), 1)))
     }
 
     private func finishDownload(_ outcome: Result<Void, any Error>, token: UUID, model: MLXModelInfo) {
-        // Cancelled or superseded: `cancelDownload` already set the status.
-        guard activeToken == token else { return }
-        clearActive()
+        activeTask = nil
+        // Cancelled: re-read the disk, the task may have finished some files.
+        guard activeToken == token else {
+            statuses[model.id] = diskStatus(of: model.id)
+            return
+        }
+        activeModelID = nil
+        activeToken = nil
         switch outcome {
         case .success where downloader.isDownloaded(model, at: baseDirectory):
             statuses[model.id] = .downloaded
@@ -202,9 +208,8 @@ final class MLXModelStore {
         }
     }
 
-    private func clearActive() {
-        activeTask = nil
-        activeModelID = nil
-        activeToken = nil
+    private func diskStatus(of modelID: String) -> Status {
+        guard let model = MLXModelRegistry.model(id: modelID) else { return .notDownloaded }
+        return downloader.isDownloaded(model, at: baseDirectory) ? .downloaded : .notDownloaded
     }
 }

@@ -16,16 +16,24 @@ protocol ModelLoading: Sendable {
     func releaseMemory()
 }
 
+/// Thrown when the model directory has no `config.json` (never downloads to recover).
+struct MLXModelFilesMissing: Error {}
+
 /// Real loader. On the simulator it never touches MLX or Hub.
 struct MLXModelLoader: ModelLoading {
-    func load(_ model: MLXModelInfo, directory base: URL) async throws -> any LLMClient {
+    func load(_ model: MLXModelInfo, directory: URL) async throws -> any LLMClient {
         #if targetEnvironment(simulator)
         throw MLXUnsupportedOnSimulator()
         #else
+        guard FileManager.default.fileExists(
+            atPath: directory.appending(path: "config.json").path(percentEncoded: false))
+        else { throw MLXModelFilesMissing() }
         Memory.cacheLimit = 64 * 1024 * 1024
+        // A directory configuration skips `hub.snapshot` (mlx-swift-lm 2.30.6 `downloadModel` returns the
+        // directory as-is; the tokenizer is read with `LanguageModelConfigurationFromHub(modelFolder:)`).
         let container = try await loadModelContainer(
-            hub: HubApi(downloadBase: base),
-            configuration: ModelConfiguration(id: model.id, revision: model.revision),
+            hub: HubApi(useOfflineMode: true),
+            configuration: ModelConfiguration(directory: directory),
             progressHandler: { _ in })
         return MLXClient(
             container: container, model: model.id,
@@ -62,6 +70,8 @@ final class MLXRuntime {
     @ObservationIgnored private let store: MLXModelStore
     @ObservationIgnored private let loader: any ModelLoading
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var loadTask: Task<Result<any LLMClient, any Error>, Never>?
+    @ObservationIgnored private var loadingModelID: String?
     @ObservationIgnored private var memoryObserver: ObserverToken?
 
     init(
@@ -84,29 +94,53 @@ final class MLXRuntime {
         memoryObserver = ObserverToken(center: notificationCenter, token: token)
     }
 
+    /// Loads `model` from its local directory. At most one load runs at a time:
+    /// a second call for the same model waits for the running one; another model cancels it.
     func load(_ model: MLXModelInfo) async {
         if state == .loaded, loadedModelID == model.id { return }
+        if let running = loadTask, loadingModelID == model.id {
+            _ = await running.value
+            return
+        }
+        cancelLoad()
         dropClient()
         generation += 1
         let current = generation
         state = .loading
+        loadingModelID = model.id
+        let loader = loader
+        let directory = HubModelDownloader.directory(of: model, at: store.baseDirectory)
         let start = ContinuousClock.now
-        do {
-            let loaded = try await loader.load(model, directory: store.baseDirectory)
-            guard current == generation else { return }
+        let task = Task<Result<any LLMClient, any Error>, Never> {
+            do {
+                return .success(try await loader.load(model, directory: directory))
+            } catch {
+                return .failure(error)
+            }
+        }
+        loadTask = task
+        let result = await task.value
+
+        guard current == generation else {
+            // Cancelled or superseded: a container that loaded anyway is dropped here.
+            if case .success = result { loader.releaseMemory() }
+            return
+        }
+        loadTask = nil
+        loadingModelID = nil
+        switch result {
+        case let .success(loaded):
             client = loaded
             loadedModelID = model.id
             lastLoadSeconds = Self.seconds(ContinuousClock.now - start)
             state = .loaded
-        } catch {
-            guard current == generation else { return }
-            dropClient()
+        case .failure:
             state = .failed(Self.loadFailedText)
         }
     }
 
     func unload() {
-        generation += 1
+        cancelLoad()
         dropClient()
         state = .idle
     }
@@ -115,6 +149,14 @@ final class MLXRuntime {
         guard state == .loaded || state == .loading else { return }
         unload()
         state = .unloadedForMemory
+    }
+
+    /// Invalidates the running load; its result is discarded when it ends.
+    private func cancelLoad() {
+        generation += 1
+        loadTask?.cancel()
+        loadTask = nil
+        loadingModelID = nil
     }
 
     private func dropClient() {
