@@ -9,4 +9,8 @@ struct SDKLinkCheckTests {
     @Test func foundationModelsClientIsLinked() {
         #expect(SDKLinkCheck.foundationModelsClientTypeName.contains("FoundationModelsClient"))
     }
+
+    @Test func mlxClientIsLinked() {
+        #expect(SDKLinkCheck.mlxClientTypeName.contains("MLXClient"))
+    }
 }

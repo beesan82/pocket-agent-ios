@@ -17,4 +17,8 @@ enum SDKLinkCheck {
     static var foundationModelsClientTypeName: String {
         String(describing: FoundationModelsClient<EmptyContext>.self)
     }
+
+    static var mlxClientTypeName: String {
+        ""
+    }
 }
