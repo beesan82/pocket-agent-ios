@@ -1,0 +1,63 @@
+name: PocketAgent
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+
+packages:
+  AgentRunKit:
+    url: https://github.com/Tom-Ryder/AgentRunKit.git
+    exactVersion: 6.1.0
+  PocketAgentCore:
+    path: Packages/PocketAgentCore
+
+targets:
+  PocketAgent:
+    type: application
+    platform: iOS
+    sources:
+      - App/PocketAgent
+    dependencies:
+      - package: PocketAgentCore
+      - package: AgentRunKit
+        product: AgentRunKit
+      - package: AgentRunKit
+        product: AgentRunKitFoundationModels
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.pocketagent
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Pocket Agent
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1"
+
+  PocketAgentTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - App/PocketAgentTests
+    dependencies:
+      - target: PocketAgent
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.pocketagent.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  PocketAgent:
+    build:
+      targets:
+        PocketAgent: all
+        PocketAgentTests: [test]
+    test:
+      targets:
+        - PocketAgentTests

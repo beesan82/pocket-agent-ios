@@ -1,0 +1,70 @@
+name: iOS CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Secret scan (AT-11, minimal)
+        run: bash ci/secret-scan.sh
+
+      - name: Select Xcode 26.x
+        run: bash ci/select-xcode.sh
+
+      - name: Core package tests
+        working-directory: Packages/PocketAgentCore
+        run: swift test
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen --version
+          xcodegen generate
+
+      - name: Resolve packages
+        run: |
+          xcodebuild -resolvePackageDependencies -project PocketAgent.xcodeproj -scheme PocketAgent
+          cat PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+      - name: Build (iOS Simulator, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project PocketAgent.xcodeproj -scheme PocketAgent \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO | tee build.log
+
+      - name: Unit tests (iOS Simulator)
+        run: |
+          set -o pipefail
+          DEST_ID=$(bash ci/pick-simulator.sh)
+          echo "Simulator: $DEST_ID"
+          xcodebuild test \
+            -project PocketAgent.xcodeproj -scheme PocketAgent \
+            -destination "id=$DEST_ID" \
+            CODE_SIGNING_ALLOWED=NO | tee test.log
+
+      - name: Upload Package.resolved and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence
+          path: |
+            PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+            build.log
+            test.log
+          if-no-files-found: ignore
