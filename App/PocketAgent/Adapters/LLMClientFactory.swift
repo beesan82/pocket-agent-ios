@@ -3,7 +3,7 @@ import AgentRunKitFoundationModels
 import PocketAgentCore
 import PocketAgentRuntime
 
-// RED stub
+/// Wires the SDK clients into Core's resolver. Clients are returned unwrapped (see `ClaudeAdapter`).
 enum LLMClientFactory {
     static func resolver(
         credentials: any CredentialStore,
@@ -13,8 +13,10 @@ enum LLMClientFactory {
         ModelBackendResolver(
             credentials: credentials,
             availability: availability,
-            makeClaude: { _ in FoundationModelsClient<EmptyContext>(context: EmptyContext()) },
-            makeAppleLocal: { try ClaudeAdapter.makeClient(apiKey: "x", model: claudeModel) }
+            makeClaude: { key in try ClaudeAdapter.makeClient(apiKey: key, model: claudeModel) },
+            // No tools: FoundationModelsClient runs tools inside its own session,
+            // bypassing AgentRunner's approval gate (ADR-009).
+            makeAppleLocal: { FoundationModelsClient<EmptyContext>(context: EmptyContext()) }
         )
     }
 }

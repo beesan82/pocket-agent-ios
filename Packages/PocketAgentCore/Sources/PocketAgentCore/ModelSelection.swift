@@ -1,14 +1,19 @@
 import Foundation
 
-// RED stub: signatures only. Behaviour is deliberately wrong.
-
+/// Which model answers (FR-02). The raw value is persisted; it is not a secret.
 public enum ModelChoice: String, Sendable, CaseIterable, Codable {
     case claude
     case appleLocal
 
-    public var displayName: String { "" }
+    public var displayName: String {
+        switch self {
+        case .claude: "Claude（クラウド）"
+        case .appleLocal: "Appleローカル（端末内）"
+        }
+    }
 }
 
+/// Why a model cannot be used right now (FR-03). Shown to the user as is.
 public enum ModelUnavailableReason: Sendable, Equatable {
     case missingAPIKey
     case deviceNotEligible
@@ -17,9 +22,25 @@ public enum ModelUnavailableReason: Sendable, Equatable {
     case unsupportedOS
     case unknown(String)
 
-    public var userMessage: String { "" }
+    public var userMessage: String {
+        switch self {
+        case .missingAPIKey:
+            "Claude APIキーが保存されていません。設定画面で入力してください。"
+        case .deviceNotEligible:
+            "この端末はApple Intelligenceに対応していません。"
+        case .appleIntelligenceNotEnabled:
+            "Apple Intelligenceがオフです。設定アプリでオンにしてください。"
+        case .modelNotReady:
+            "端末内モデルを準備中です（ダウンロード中など）。しばらくしてから再試行してください。"
+        case .unsupportedOS:
+            "このiOSバージョンでは端末内モデルを利用できません。"
+        case let .unknown(detail):
+            "端末内モデルを利用できません（\(detail)）。"
+        }
+    }
 }
 
+/// Where the Claude API key lives. The app uses the Keychain; nothing else may hold the key.
 public protocol CredentialStore: Sendable {
     func readAPIKey() throws -> String?
     func saveAPIKey(_ apiKey: String) throws
@@ -27,6 +48,7 @@ public protocol CredentialStore: Sendable {
 }
 
 public protocol ModelAvailabilityChecking: Sendable {
+    /// `nil` means the on-device model can be used now.
     func appleLocalUnavailableReason() -> ModelUnavailableReason?
 }
 
@@ -36,6 +58,11 @@ public enum ModelResolutionError: Error, Sendable, Equatable {
     case clientCreationFailed
 }
 
+/// Turns the user's model choice into a client, keeping the two paths apart:
+/// - `.appleLocal` never reads the API key nor builds a Claude client (AT-14)
+/// - an unavailable on-device model is reported, never replaced by Claude (AT-03)
+///
+/// Generic over `Backend` so this stays free of AgentRunKit.
 public struct ModelBackendResolver<Backend>: Sendable {
     private let credentials: any CredentialStore
     private let availability: any ModelAvailabilityChecking
@@ -55,6 +82,32 @@ public struct ModelBackendResolver<Backend>: Sendable {
     }
 
     public func resolve(_ choice: ModelChoice) -> Result<Backend, ModelResolutionError> {
-        .failure(.clientCreationFailed)
+        switch choice {
+        case .appleLocal:
+            if let reason = availability.appleLocalUnavailableReason() {
+                return .failure(.unavailable(reason))
+            }
+            return build(makeAppleLocal)
+        case .claude:
+            let stored: String?
+            do {
+                stored = try credentials.readAPIKey()
+            } catch {
+                return .failure(.credentialReadFailed)
+            }
+            let key = stored?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !key.isEmpty else {
+                return .failure(.unavailable(.missingAPIKey))
+            }
+            return build { try makeClaude(key) }
+        }
+    }
+
+    private func build(_ make: () throws -> Backend) -> Result<Backend, ModelResolutionError> {
+        do {
+            return try .success(make())
+        } catch {
+            return .failure(.clientCreationFailed)
+        }
     }
 }
