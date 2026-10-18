@@ -100,6 +100,16 @@ struct ClaudeAdapterTests {
         #expect(!other.isEmpty)
         #expect(Set([rateLimited, offline, server]).count == 3)
     }
+
+    @Test func contextOverflowHasOwnMessage() {
+        let overflow = LLMErrorDescriber.userMessage(
+            for: AgentError.llmError(.other("exceededContextWindowSize(Context(debugDescription: \"x\"))"))
+        )
+        let generic = LLMErrorDescriber.userMessage(for: AgentError.llmError(.other("something else")))
+
+        #expect(overflow == "会話が長くなりすぎました。新しい会話を始めてください。")
+        #expect(generic != overflow)
+    }
 }
 
 private func failureMessage(_ body: () async throws -> Void) async -> String {
