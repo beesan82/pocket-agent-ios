@@ -16,7 +16,7 @@ final class ConversationRepository {
         let record = ConversationRecord(
             title: Self.defaultTitle, createdAt: now, updatedAt: now, modelChoiceRaw: choice.rawValue)
         context.insert(record)
-        try context.save()
+        try save()
         return record
     }
 
@@ -37,7 +37,17 @@ final class ConversationRepository {
         }
         conversation.updatedAt = now
         conversation.modelChoiceRaw = choice.rawValue
-        try context.save()
+        try save()
+    }
+
+    /// On failure, discards the pending changes so a later save cannot commit them.
+    private func save() throws {
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
     }
 
     func turns(of conversation: ConversationRecord) -> [ChatTurn] {
@@ -55,7 +65,7 @@ final class ConversationRepository {
 
     func delete(_ conversation: ConversationRecord) throws {
         context.delete(conversation)
-        try context.save()
+        try save()
     }
 
     func deleteAll() throws {
@@ -63,7 +73,7 @@ final class ConversationRepository {
         for conversation in try context.fetch(FetchDescriptor<ConversationRecord>()) {
             context.delete(conversation)
         }
-        try context.save()
+        try save()
     }
 }
 

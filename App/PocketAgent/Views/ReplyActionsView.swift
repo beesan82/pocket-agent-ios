@@ -11,16 +11,14 @@ struct ReplyActionsView: View {
     @State private var edited: String?
     @State private var showEditor = false
     @State private var flow = ShareFlow()
-    @State private var opening = false
+    // Presentation only: `flow` is changed solely by the dialog's button actions, so SwiftUI
+    // resetting this flag before running "LINEを開く" can never cancel the share.
+    @State private var showDialog = false
 
     private var currentText: String { edited ?? text }
 
-    private var showDialog: Binding<Bool> {
-        Binding(
-            get: { if case .confirming = flow.state { !opening } else { false } },
-            set: { presented in
-                if !presented, !opening, case .confirming = flow.state { flow.cancel() }
-            })
+    private var confirmingText: String? {
+        if case let .confirming(text) = flow.state { text } else { nil }
     }
 
     var body: some View {
@@ -33,7 +31,10 @@ struct ReplyActionsView: View {
             HStack(spacing: 16) {
                 Button("編集") { showEditor = true }
                 Button("コピー") { UIPasteboard.general.string = currentText }
-                Button("LINEで共有") { flow.request(currentText) }
+                Button("LINEで共有") {
+                    flow.request(currentText)
+                    showDialog = confirmingText != nil
+                }
             }
             .buttonStyle(.bordered)
             .font(.footnote)
@@ -44,22 +45,21 @@ struct ReplyActionsView: View {
         .sheet(isPresented: $showEditor) {
             ReplyEditSheet(initial: currentText) { edited = $0 }
         }
-        .confirmationDialog("LINEで共有", isPresented: showDialog, titleVisibility: .visible) {
+        .confirmationDialog(
+            "LINEで共有", isPresented: $showDialog, titleVisibility: .visible, presenting: confirmingText
+        ) { _ in
             Button("LINEを開く") { openLine() }
+            // Also runs when the dialog is dismissed by tapping outside.
             Button("キャンセル", role: .cancel) { flow.cancel() }
-        } message: {
-            if case let .confirming(preview) = flow.state {
-                Text("\(String(preview.prefix(200)))\n\nLINEの送信先選択画面を開きます。送信はLINEであなたが行います")
-            }
+        } message: { preview in
+            Text("\(String(preview.prefix(200)))\n\nLINEの送信先選択画面を開きます。送信はLINEであなたが行います")
         }
     }
 
     private func openLine() {
         guard let url = flow.confirm() else { return }
-        opening = true
         openURL(url) { accepted in
             flow.didOpen(accepted)
-            opening = false
         }
     }
 }

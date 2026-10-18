@@ -58,7 +58,10 @@ final class ApprovalBroker {
         resolve(id: active.id, with: decision)
     }
 
-    func deny(id: UUID) {}
+    /// Denies the request identified by `id`; no-op if it was already answered or another is active.
+    func deny(id: UUID) {
+        resolve(id: id, with: .deny(reason: nil))
+    }
 
     /// Resumes the active request only if it is still the one identified by `id`.
     private func resolve(id: UUID, with decision: UserApprovalDecision) {

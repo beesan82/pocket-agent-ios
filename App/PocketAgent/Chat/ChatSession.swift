@@ -30,8 +30,6 @@ final class ChatSession {
     @ObservationIgnored private let notes: any NoteStore
     @ObservationIgnored private let settings: ModelSettings
     @ObservationIgnored private let resolve: ClientResolver
-    /// "Allow for this conversation" lives here: shared by every turn and both tool paths.
-    @ObservationIgnored private let approvals: ConversationApprovals
     @ObservationIgnored private let approvalHandler: ToolApprovalGate.ApprovalHandler
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -49,9 +47,9 @@ final class ChatSession {
         self.settings = settings
         self.resolve = resolve
         turns = repository.turns(of: conversation)
-        let approvals = ConversationApprovals()
-        self.approvals = approvals
-        approvalHandler = approvals.handler(asking: { [notes] request in
+        // "Allow for this conversation" lives in this handler's ConversationApprovals: shared by
+        // every turn and both tool paths for as long as this session (the open chat screen) exists.
+        approvalHandler = ConversationApprovals().handler(asking: { [notes] request in
             let summary = await ChatSession.summary(for: request, notes: notes)
             return await broker.ask(request, summary: summary)
         })
@@ -106,20 +104,23 @@ final class ChatSession {
         case .claude: NoteTools.make(store: notes, limit: .claude)
         case .appleLocal: []
         }
-        let budget: HistoryBudget = switch choice {
-        case .claude: .claude
-        case .appleLocal: .appleLocal
+        // The on-device client accepts only system messages plus one user message
+        // (AgentRunKit 6.1.0 FMMessageMapper), so earlier turns are folded into the prompt.
+        let (prompt, history): (String, [ChatMessage]) = switch choice {
+        case .claude:
+            (message, ConversationContext.history(from: previousTurns, budget: .claude))
+        case .appleLocal:
+            (ConversationContext.appleLocalPrompt(history: previousTurns, message: message), [])
         }
         let runner = AgentRunner<EmptyContext>(
             client: client, tools: runnerTools, systemPrompt: ConversationContext.systemPrompt)
-        let history = ConversationContext.history(from: previousTurns, budget: budget)
 
         status = .running
         task = Task {
             let outcome: Result<AgentRunOutcome, any Error>
             do {
                 outcome = try await .success(runner.run(
-                    message, history: history, context: EmptyContext(), approval: handler))
+                    prompt, history: history, context: EmptyContext(), approval: handler))
             } catch {
                 outcome = .failure(error)
             }

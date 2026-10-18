@@ -68,7 +68,9 @@ private struct ChatContent: View {
             }
         }
         .safeAreaInset(edge: .bottom) { inputBar }
-        .sheet(item: Binding(get: { broker.pending }, set: { if $0 == nil { broker.answer(.deny(reason: nil)) } })) { request in
+        // The setter is a no-op: ApprovalSheet denies its own request by id when it disappears,
+        // so closing one sheet can never deny a successor request.
+        .sheet(item: Binding(get: { broker.pending }, set: { _ in })) { request in
             ApprovalSheet(request: request, broker: broker).id(request.id)
         }
     }
@@ -77,7 +79,7 @@ private struct ChatContent: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(settings.choice.displayName).font(.caption).foregroundStyle(.secondary)
             if settings.choice == .claude {
-                Text("Claude選択中: 入力はAnthropicへ送信されます")
+                Text("Claude選択中: 入力・直近の会話・参照したメモはAnthropicへ送信されます")
                     .font(.caption).foregroundStyle(.orange)
             }
             HStack(alignment: .bottom) {

@@ -6,6 +6,7 @@ import PocketAgentRuntime
 enum RunFailureText {
     static let stopped = "停止しました"
     static let emptyReply = "（空の応答）"
+    static let endedEarly = "応答が途中で終了しました"
 
     static func message(for error: ModelResolutionError) -> String {
         switch error {
@@ -23,8 +24,9 @@ enum RunFailureText {
         switch outcome {
         case .completed:
             nil
-        case let .endedEarly(reason, _):
-            "途中で終了しました（\(reason)）"
+        case .endedEarly:
+            // The reason comes from the provider; never show it.
+            endedEarly
         case let .stepLimitReached(limit):
             "上限（\(limit)ステップ）に達したため停止しました"
         case let .tokenBudgetExceeded(budget, used):

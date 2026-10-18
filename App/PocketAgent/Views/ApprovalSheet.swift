@@ -51,6 +51,8 @@ struct ApprovalSheet: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium, .large])
+        // Any dismissal denies; a no-op once this request was answered.
+        .onDisappear { broker.deny(id: request.id) }
     }
 
     private func answer(_ decision: UserApprovalDecision) {

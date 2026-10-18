@@ -78,7 +78,7 @@
 - 承認ダイアログ（要件8章）: ツール名を日本語ラベルで、操作内容（`save_note` は保存する本文。`delete_note` は id ではなく**削除対象メモの本文**を App 側で `NoteStore` から引いて表示。見つからない id は「該当するメモがありません」と表示し、許可されてもツールは `ToolResult.error` を返すだけ）、リスク、「今回だけ許可」「この会話では許可」（許される場合のみ表示）「拒否」。`AsyncStream`/`CheckedContinuation` で `ApprovalHandler` と UI をつなぐ。ダイアログ表示中の停止でツールは実行されない。
 - ツール実行状態（要件7章の proposed/awaitingApproval/executing/succeeded/failed/cancelled）はプレーン版では「承認待ち」の表示のみ。完全表示は次版（筆者判断）。
 - 失敗表示は `LLMErrorDescriber` / `ModelUnavailableReason.userMessage` のみ（エラー本体を出さない, ADR-010）。
-- Claude 選択中は入力欄付近に「Claude選択中: 入力はAnthropicへ送信されます」を常時表示。
+- Claude 選択中は入力欄付近に「Claude選択中: 入力・直近の会話・参照したメモはAnthropicへ送信されます」を常時表示。
 
 ### LINE 返信（App）
 - 各アシスタント返答の操作: 「編集」→ シートで編集（編集結果はその返答の共有用文面として保持。会話履歴自体は書き換えない）、「コピー」→ `UIPasteboard`、「LINEで共有」→ 確認ダイアログ（本文プレビュー、「LINEの送信先選択画面を開きます。送信はLINEであなたが行います」）→ `LineShareURLBuilder.url(for:)` を `openURL`。
