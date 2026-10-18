@@ -24,6 +24,14 @@
    - Issuer ID / Key ID / `.p8` を登録
 3. Applications → Add application → GitHub → `pocket-agent-ios` → 設定方法は `codemagic.yaml` を選ぶ。
 
+## 4.5 署名ファイルを用意する（ビルド時に自動作成はされない）
+Codemagic の `ios_signing` は、事前に登録された証明書とプロファイルを探して使うだけ。無いと
+「No matching profiles found for bundle identifier ... and distribution type "app_store"」で止まる（2026-10-18 実際に発生）。
+1. Codemagic → Settings → codemagic.yaml settings → Code signing identities → iOS certificates → Generate certificate
+   （Reference name `pocketagent-dist` / Apple Distribution / キー `Pocket Agent ASC`）。ダウンロードは1回だけ。一覧に無ければ Upload certificate で登録。
+2. developer.apple.com → プロファイル → ＋ → 配信「App Store Connect」→ App ID `com.beesan82.pocketagent` → 手順1の証明書 → 名前 `Pocket Agent App Store` → 生成。
+3. Codemagic → Code signing identities → iOS provisioning profiles → Fetch profiles → `Pocket Agent App Store` を選択（Reference name `pocketagent-appstore`）→ Download selected。
+
 ## 5. ビルドを実行する
 1. Codemagic → Pocket Agent → Start new build → ブランチ `main` / ワークフロー **iOS TestFlight**。
 2. 成功すると App Store Connect の TestFlight に処理中のビルドが現れる（処理に数分〜数十分）。

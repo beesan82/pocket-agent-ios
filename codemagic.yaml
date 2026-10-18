@@ -6,6 +6,10 @@
 #      (role: App Manager) and name the integration exactly "Pocket Agent ASC".
 #   2. App Store Connect: create the app record with the bundle ID below,
 #      then put its numeric Apple ID into APP_STORE_APPLE_ID.
+#   3. Codemagic does NOT create signing files during the build. `ios_signing` only picks
+#      matching files already in Settings → codemagic.yaml settings → Code signing identities:
+#      an Apple Distribution certificate (Generate certificate) and an App Store profile for
+#      the bundle ID (create it in the Apple Developer portal, then Fetch profiles).
 workflows:
   ios-testflight:
     name: iOS TestFlight
