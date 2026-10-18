@@ -84,15 +84,36 @@ final class MLXRuntime {
     }
 
     func load(_ model: MLXModelInfo) async {
-        // RED stub
+        if state == .loaded, loadedModelID == model.id { return }
+        dropClient()
+        generation += 1
+        let current = generation
+        state = .loading
+        let start = ContinuousClock.now
+        do {
+            let loaded = try await loader.load(model, from: store.baseDirectory)
+            guard current == generation else { return }
+            client = loaded
+            loadedModelID = model.id
+            lastLoadSeconds = Self.seconds(ContinuousClock.now - start)
+            state = .loaded
+        } catch {
+            guard current == generation else { return }
+            dropClient()
+            state = .failed(Self.loadFailedText)
+        }
     }
 
     func unload() {
-        // RED stub
+        generation += 1
+        dropClient()
+        state = .idle
     }
 
     func handleMemoryWarning() {
-        // RED stub
+        guard state == .loaded || state == .loading else { return }
+        unload()
+        state = .unloadedForMemory
     }
 
     private func dropClient() {

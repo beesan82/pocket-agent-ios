@@ -46,7 +46,12 @@ struct HubModelDownloader: ModelDownloading {
     }
 
     func isDownloaded(_ model: MLXModelInfo, at base: URL) -> Bool {
-        false // RED stub
+        let directory = Self.directory(of: model, at: base)
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: directory.appending(path: "config.json").path(percentEncoded: false))
+        else { return false }
+        let names = (try? fileManager.contentsOfDirectory(atPath: directory.path(percentEncoded: false))) ?? []
+        return names.contains { $0.hasSuffix(".safetensors") }
     }
 
     func delete(_ model: MLXModelInfo, at base: URL) throws {
@@ -113,7 +118,7 @@ final class MLXModelStore {
     }
 
     func status(of model: MLXModelInfo) -> Status {
-        .notDownloaded // RED stub
+        statuses[model.id] ?? .notDownloaded
     }
 
     /// Re-reads the files on disk for every model that is not downloading.
@@ -126,20 +131,58 @@ final class MLXModelStore {
     func startDownload(
         _ model: MLXModelInfo, freeBytes: Int64, isExpensiveNetwork: Bool, confirmed: Bool = false
     ) -> StartResult {
-        .started // RED stub
+        guard activeTask == nil else { return .busy }
+        guard DiskSpaceRule.canDownload(modelBytes: model.approxBytes, freeBytes: freeBytes) else {
+            return .refusedDiskSpace(requiredBytes: model.approxBytes + model.approxBytes / 2)
+        }
+        if isExpensiveNetwork && !confirmed { return .needsConfirmation }
+
+        let token = UUID()
+        activeToken = token
+        activeModelID = model.id
+        statuses[model.id] = .downloading(0)
+        let downloader = downloader
+        let base = baseDirectory
+        // The store lives as long as the app; strong captures keep the code simple.
+        activeTask = Task {
+            let outcome: Result<Void, any Error>
+            do {
+                try await downloader.download(model, to: base) { value in
+                    Task { @MainActor in self.applyProgress(value, token: token, modelID: model.id) }
+                }
+                outcome = .success(())
+            } catch {
+                outcome = .failure(error)
+            }
+            self.finishDownload(outcome, token: token, model: model)
+        }
+        return .started
     }
 
     func cancelDownload() {
-        // RED stub
+        guard let task = activeTask, let modelID = activeModelID else { return }
+        task.cancel()
+        clearActive()
+        if let model = MLXModelRegistry.model(id: modelID) {
+            statuses[modelID] = downloader.isDownloaded(model, at: baseDirectory) ? .downloaded : .notDownloaded
+        } else {
+            statuses[modelID] = .notDownloaded
+        }
     }
 
     func delete(_ model: MLXModelInfo) {
-        // RED stub
+        if activeModelID == model.id { cancelDownload() }
+        do {
+            try downloader.delete(model, at: baseDirectory)
+            statuses[model.id] = .notDownloaded
+        } catch {
+            statuses[model.id] = .failed(Self.deleteFailedText)
+        }
     }
 
     /// Test hook: waits for the current download task (if any) to end.
     func waitForDownload() async {
-        // RED stub
+        await activeTask?.value
     }
 
     private func applyProgress(_ value: Double, token: UUID, modelID: String) {
