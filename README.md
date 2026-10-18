@@ -6,10 +6,10 @@ iPhone 完結型マルチモデル AI エージェント。要件は [AGENT_REQU
 
 | 項目 | 状態 |
 |---|---|
-| XcodeGen プロジェクト / 最小 SwiftUI アプリ | 実装済み・**CI 未実行** |
-| AgentRunKit 6.1.0（exact）のリンク | 実装済み・**CI 未実行** |
-| LINE 共有 URL 生成 + ユニットテスト | 実装済み・**CI 未実行**（UI 未接続） |
-| GitHub Actions macOS CI | 実装済み・**未実行** |
+| XcodeGen プロジェクト / 最小 SwiftUI アプリ | CI でシミュレータ向けビルド成功（実機未確認） |
+| AgentRunKit 6.1.0（exact）のリンク | CI でビルド・テスト成功 |
+| LINE 共有 URL 生成 + ユニットテスト | CI でテスト合格（UI 未接続） |
+| GitHub Actions macOS CI | 稼働中（初回成功: commit `cc13b32`） |
 | チャット / Claude / Apple ローカル / Keychain / 履歴 / 承認 | 未実装 |
 | Codemagic / TestFlight | 未実装 |
 

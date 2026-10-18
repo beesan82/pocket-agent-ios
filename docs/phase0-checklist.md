@@ -10,17 +10,18 @@
 - [x] AgentRunKit v6.1.0 の tag / Package.swift / 主要型シグネチャをソースで確認（ビルドではない）
 
 ## 0-2 プロジェクト・CI
-- [~] XcodeGen `project.yml`（iOS 26, Swift 6, AgentRunKit exact 6.1.0）
-- [~] 最小 SwiftUI アプリ
-- [~] `PocketAgentCore` パッケージ + LINE URL ユニットテスト
-- [~] GitHub Actions macOS CI（secret scan / swift test / xcodebuild build / test）
-- [ ] Git リポジトリ作成 → GitHub へ push（**この PC に git 未インストール**）
-- [ ] CI 初回成功（AT-12 の証跡）
-- [ ] 生成された `Package.resolved` をコミット
+- [x] XcodeGen `project.yml`（iOS 26, Swift 6, AgentRunKit exact 6.1.0）
+- [x] 最小 SwiftUI アプリ（シミュレータ向けビルドのみ。実機未確認）
+- [x] `PocketAgentCore` パッケージ + LINE URL ユニットテスト
+- [x] GitHub Actions macOS CI（secret scan / swift test / xcodebuild build / test）
+- [x] GitHub へ push（`beesan82/pocket-agent-ios`, commit `cc13b32`）
+- [x] CI 初回成功（AT-12）— 2026-10-18、ユーザーが Actions 画面で確認。ログは未取得
+- [ ] 生成された `Package.resolved`（Artifact `ci-evidence`）をコミット
+- [ ] CI ログから実際の Xcode / Swift / シミュレータ版を記録
 
 ## 0-3 AgentRunKit iOS ビルド
-- [~] `AgentRunKit` と `AgentRunKitFoundationModels` をリンクし、ソースで存在を確認した型だけを参照（`SDKLinkCheck.swift`）
-- [ ] CI で上記がビルドできることを確認
+- [x] `AgentRunKit` と `AgentRunKitFoundationModels` をリンクし、ソースで存在を確認した型だけを参照（`SDKLinkCheck.swift`）
+- [x] CI で上記がビルドでき、`SDKLinkCheckTests` が通ることを確認（commit `cc13b32`）
 
 ## 0-4 FakeLLM
 - [ ] `AgentRunKitTesting.TestLLMClient` の API をソースで確認
