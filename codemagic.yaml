@@ -50,4 +50,6 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
+        # Internal testing needs no Beta App Review; true failed post-processing on build 2
+        # (external review needs test info). Internal group gets builds via automatic distribution.
+        submit_to_testflight: false

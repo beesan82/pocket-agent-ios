@@ -8,10 +8,12 @@ on:
     paths-ignore:
       - "docs/**"
       - "**/*.md"
+      - "codemagic.yaml"
   pull_request:
     paths-ignore:
       - "docs/**"
       - "**/*.md"
+      - "codemagic.yaml"
   workflow_dispatch:
 
 permissions:
