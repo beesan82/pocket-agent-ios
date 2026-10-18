@@ -16,7 +16,7 @@
 - [x] GitHub Actions macOS CI（secret scan / swift test / xcodebuild build / test）
 - [x] GitHub へ push（`beesan82/pocket-agent-ios`, commit `cc13b32`）
 - [x] CI 初回成功（AT-12）— 2026-10-18、ユーザーが Actions 画面で確認。ログは未取得
-- [ ] 生成された `Package.resolved`（Artifact `ci-evidence`）をコミット
+- [x] 生成された `Package.resolved`（Artifact `ci-evidence`）をコミットし、アプリの解決にも使用・ずれ検知（run 39101910024）
 - [x] CI ログから実際の Xcode / Swift 版を記録（Xcode 26.6 / Swift 6.3.3、runner macos-26）
 
 ## 0-3 AgentRunKit iOS ビルド
@@ -39,7 +39,8 @@
 - [x] 設定画面（キー入力・保存・削除、モデル選択、Apple 不可時は選択不可＋理由表示）と 1 往復テスト画面 — **ビルドのみ確認。画面操作は未検証**
 - [ ] ClaudeAdapter: 実 API キー（Keychain 入力）で 1 往復 — **実機未検証**（TestFlight 未接続）
 - [ ] AppleLocalAdapter: 実機での availability 判定 + 1 往復 — **実機未検証**（Apple Intelligence 対応実機が必要）
-- [ ] 型付きツールを 1 件呼び出し（実モデル）— 未着手。Apple ローカルはツール承認の設計待ち（ADR-009）
+- [x] Apple ローカル向けツール承認ゲート `ToolApprovalGate`（ADR-009）— Runtime テスト 8 件合格（run 39101910024）
+- [ ] 型付きツールを 1 件呼び出し（実モデル）— **実機未検証**。アプリにツール未接続
 
 ## ゲート / ブロッカー
 - 実機検証の手順（TestFlight 接続後）: 設定でキー保存 → 1往復テスト（Claude）→ 設定で Appleローカル → 1往復テスト（機内モードでも応答すること、AT-02/AT-14）→ Claude に戻して再送信（AT-04）
