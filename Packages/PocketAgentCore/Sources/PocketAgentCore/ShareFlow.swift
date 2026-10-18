@@ -17,26 +17,42 @@ public struct ShareFlow: Equatable, Sendable {
     public init() {}
 
     public mutating func request(_ text: String) {
-        // RED stub
-        state = .idle
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            state = .failed("共有する文面がありません")
+        } else {
+            state = .confirming(text: text)
+        }
     }
 
     public mutating func cancel() {
-        // RED stub
-        state = .idle
+        state = .cancelled
     }
 
+    /// Returns the LINE share URL only while confirming; the state stays
+    /// `.confirming` until the caller reports the open result via `didOpen`.
     public mutating func confirm() -> URL? {
-        // RED stub
-        nil
+        guard case .confirming(let text) = state else { return nil }
+        do {
+            return try LineShareURLBuilder.url(for: text)
+        } catch {
+            state = .failed("共有する文面がありません")
+            return nil
+        }
     }
 
     public mutating func didOpen(_ accepted: Bool) {
-        // RED stub
+        guard case .confirming = state else { return }
+        state = accepted ? .opened : .failed("LINEを開けませんでした")
     }
 
     public static func statusMessage(for state: State) -> String? {
-        // RED stub
-        nil
+        switch state {
+        case .opened:
+            return "LINEの共有画面を開きました（送信は未確認）"
+        case .failed(let message):
+            return message
+        case .idle, .confirming, .cancelled:
+            return nil
+        }
     }
 }
