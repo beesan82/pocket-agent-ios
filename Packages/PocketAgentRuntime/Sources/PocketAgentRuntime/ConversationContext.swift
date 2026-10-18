@@ -29,6 +29,33 @@ public enum ConversationContext {
 
     /// Newest turns that fit the budget, oldest first. `turns` excludes the current user message.
     public static func history(from turns: [ChatTurn], budget: HistoryBudget) -> [ChatMessage] {
+        trimmed(turns, budget: budget).map { turn in
+            switch turn.role {
+            case .user: ChatMessage.user(turn.text)
+            case .assistant: ChatMessage.assistant(AssistantMessage(content: turn.text))
+            }
+        }
+    }
+
+    /// One prompt for the on-device model, which accepts a single user message only.
+    /// Earlier turns (trimmed like `history`) become a labelled transcript inside the prompt,
+    /// never part of the instructions: pasted text must not outrank the system prompt.
+    public static func appleLocalPrompt(
+        history turns: [ChatTurn], message: String, budget: HistoryBudget = .appleLocal
+    ) -> String {
+        let kept = trimmed(turns, budget: budget)
+        guard !kept.isEmpty else { return message }
+        let transcript = kept.map { turn in
+            switch turn.role {
+            case .user: "ユーザー: \(turn.text)"
+            case .assistant: "アシスタント: \(turn.text)"
+            }
+        }
+        return "これまでの会話:\n" + transcript.joined(separator: "\n") + "\n\n今回のメッセージ:\n" + message
+    }
+
+    /// Newest turns within the budget, oldest first, never starting with an assistant turn.
+    private static func trimmed(_ turns: [ChatTurn], budget: HistoryBudget) -> [ChatTurn] {
         var kept: [ChatTurn] = []
         var characters = 0
         for turn in turns.reversed() {
@@ -37,17 +64,6 @@ public enum ConversationContext {
             kept.append(turn)
             characters = total
         }
-        return kept.reversed().drop { $0.role == .assistant }.map { turn in
-            switch turn.role {
-            case .user: ChatMessage.user(turn.text)
-            case .assistant: ChatMessage.assistant(AssistantMessage(content: turn.text))
-            }
-        }
-    }
-
-    public static func appleLocalPrompt(
-        history turns: [ChatTurn], message: String, budget: HistoryBudget = .appleLocal
-    ) -> String {
-        message
+        return Array(kept.reversed().drop { $0.role == .assistant })
     }
 }

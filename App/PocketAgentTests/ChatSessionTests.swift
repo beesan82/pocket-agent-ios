@@ -96,8 +96,7 @@ final class FakeLLMClient: LLMClient {
                     guard case let .text(text) = part else { throw FakeError.unsupportedMapping }
                     return text
                 }
-                try acceptUser(texts.joined(separator: "
-"))
+                try acceptUser(texts.joined(separator: "\n"))
             case .assistant, .tool:
                 throw FakeError.unsupportedMapping
             }
