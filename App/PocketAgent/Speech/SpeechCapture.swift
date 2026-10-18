@@ -175,7 +175,7 @@ final class SpeechCapture {
     }
 
     nonisolated private static func downloadAssets(locale: Locale) async throws {
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+        let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             try await request.downloadAndInstall()
         }
@@ -202,7 +202,8 @@ private final class AudioPipeline: @unchecked Sendable {
     }
 
     static func make(locale: Locale) async throws -> AudioPipeline {
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+        // Progressive preset reports volatile (tentative) results for live display.
+        let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw SpeechCaptureError.noAudioFormat
         }
