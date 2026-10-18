@@ -20,7 +20,7 @@ workflows:
       vars:
         XCODE_PROJECT: PocketAgent.xcodeproj
         XCODE_SCHEME: PocketAgent
-        APP_STORE_APPLE_ID: "0000000000"
+        APP_STORE_APPLE_ID: "6824194188"
       xcode: latest
     scripts:
       - name: Generate Xcode project (XcodeGen) with pinned packages

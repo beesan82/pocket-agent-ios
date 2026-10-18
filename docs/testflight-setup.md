@@ -10,7 +10,7 @@
 ## 2. App Store Connect にアプリを作る
 1. appstoreconnect.apple.com → アプリ → ＋ → 新規アプリ
    - プラットフォーム: iOS / 名前: Pocket Agent（使用済みなら「Pocket Agent Dev」など）/ 言語: 日本語 / バンドルID: 手順1のもの / SKU: `pocketagent`
-2. 作成後「アプリ情報」の **Apple ID（数字）** を Claude に伝える → `codemagic.yaml` の `APP_STORE_APPLE_ID` に入れる（秘密情報ではない）。
+2. 作成済み（Apple ID `6824194188`、`codemagic.yaml` の `APP_STORE_APPLE_ID` に反映済み）。
 
 ## 3. App Store Connect API キーを作る
 1. App Store Connect → ユーザとアクセス → 統合 → App Store Connect API → チームキー → ＋
