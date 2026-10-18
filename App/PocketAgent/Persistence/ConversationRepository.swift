@@ -89,6 +89,7 @@ enum DataReset {
         do { try ConversationRepository(context: context).deleteAll() } catch { firstError = firstError ?? error }
         do { try await journal.deleteAll() } catch { firstError = firstError ?? error }
         do { try credentials.deleteAPIKey() } catch { firstError = firstError ?? error }
+        do { try githubToken.deleteAPIKey() } catch { firstError = firstError ?? error }
         if let firstError { throw firstError }
     }
 }

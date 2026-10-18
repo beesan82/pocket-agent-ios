@@ -39,6 +39,14 @@ struct MeasurementUploader: Sendable {
         let number: Int?
     }
 
+    private struct RepositoryResponse: Decodable {
+        let isPrivate: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case isPrivate = "private"
+        }
+    }
+
     private let session: URLSession
 
     init(session: URLSession = .shared) {
@@ -47,19 +55,21 @@ struct MeasurementUploader: Sendable {
 
     func upload(log: String, title: String, repository: String, token: String) async -> UploadResult {
         guard DeveloperSettings.isValidRepository(repository),
+              let repositoryURL = URL(string: "https://api.github.com/repos/\(repository)"),
               let url = URL(string: "https://api.github.com/repos/\(repository)/issues")
         else { return .failed(.invalidRepository) }
+
+        // The log contains spoken text: refuse unless GitHub itself says the repository is private.
+        if let refusal = await checkPrivate(repositoryURL: repositoryURL, token: token) {
+            return .failed(refusal)
+        }
 
         let body = Self.truncated(log)
         var labels: [String]? = ["measurement"]
         while true {
             let payload = IssuePayload(title: title, body: body, labels: labels)
             guard let data = try? JSONEncoder().encode(payload) else { return .failed(.badResponse) }
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+            var request = Self.request(url: url, method: "POST", token: token)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = data
 
@@ -80,6 +90,42 @@ struct MeasurementUploader: Sendable {
         }
     }
 
+    private static func request(url: URL, method: String, token: String) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        return request
+    }
+
+    /// nil when the repository is confirmed private; otherwise the failure to report (no POST then).
+    private func checkPrivate(repositoryURL: URL, token: String) async -> UploadFailure? {
+        let responseData: Data
+        let response: URLResponse
+        do {
+            (responseData, response) = try await session.data(
+                for: Self.request(url: repositoryURL, method: "GET", token: token))
+        } catch {
+            return .network
+        }
+        guard let http = response as? HTTPURLResponse else { return .badResponse }
+        guard http.statusCode == 200 else { return Self.failure(for: http) }
+        guard let isPrivate = (try? JSONDecoder().decode(RepositoryResponse.self, from: responseData))?.isPrivate
+        else { return .badResponse }
+        return isPrivate ? nil : .repositoryNotPrivate
+    }
+
+    private static func failure(for http: HTTPURLResponse) -> UploadFailure {
+        switch http.statusCode {
+        case 401: .unauthorized
+        case 403: http.value(forHTTPHeaderField: "x-ratelimit-remaining") == "0" ? .rateLimited : .unauthorized
+        case 404: .notFound
+        case 429: .rateLimited
+        default: .server(http.statusCode)
+        }
+    }
+
     private static func result(for http: HTTPURLResponse, data: Data) -> UploadResult {
         switch http.statusCode {
         case 201:
@@ -87,17 +133,8 @@ struct MeasurementUploader: Sendable {
                 return .failed(.badResponse)
             }
             return .created(issueNumber: number)
-        case 401:
-            return .failed(.unauthorized)
-        case 403:
-            let remaining = http.value(forHTTPHeaderField: "x-ratelimit-remaining")
-            return .failed(remaining == "0" ? .rateLimited : .unauthorized)
-        case 404:
-            return .failed(.notFound)
-        case 429:
-            return .failed(.rateLimited)
         default:
-            return .failed(.server(http.statusCode))
+            return .failed(failure(for: http))
         }
     }
 

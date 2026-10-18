@@ -108,7 +108,7 @@ struct SettingsView: View {
         }
         .navigationTitle("設定")
         .confirmationDialog(
-            "会話・メモ・APIキーをすべて削除します", isPresented: $confirmErase, titleVisibility: .visible
+            "会話・メモ・APIキー・GitHub トークンをすべて削除します", isPresented: $confirmErase, titleVisibility: .visible
         ) {
             Button("全データ削除", role: .destructive) { Task { await eraseAll() } }
             Button("キャンセル", role: .cancel) {}
@@ -119,6 +119,9 @@ struct SettingsView: View {
     private var developerSection: some View {
         Section {
             Toggle("開発者モード", isOn: $developer.isEnabled)
+                .onChange(of: developer.isEnabled) { _, enabled in
+                    if !enabled { tokenInput = "" }
+                }
             if developer.isEnabled {
                 SecureField("GitHub トークン", text: $tokenInput)
                     .textInputAutocapitalization(.never)
@@ -176,6 +179,8 @@ struct SettingsView: View {
                 context: modelContext,
                 journal: SwiftDataJournalStore(modelContainer: modelContext.container),
                 credentials: credentials, githubToken: tokenStore)
+            developer.isEnabled = false
+            tokenInput = ""
             eraseStatus = "すべてのデータを削除しました"
         } catch {
             eraseStatus = "削除を完了できませんでした。もう一度お試しください"

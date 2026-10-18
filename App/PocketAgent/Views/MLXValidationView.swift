@@ -154,9 +154,16 @@ struct MLXValidationView: View {
 
     /// Only reachable from the confirmation dialog's 送信 button.
     private func uploadLog() async {
-        guard !uploading, developer.isEnabled,
-              let token = try? tokenStore.readAPIKey(), !token.isEmpty
-        else {
+        guard !uploading, developer.isEnabled else { return }
+        let stored: String?
+        do {
+            stored = try tokenStore.readAPIKey()
+        } catch {
+            uploadSucceeded = false
+            uploadMessage = "トークンを読み出せませんでした"
+            return
+        }
+        guard let token = stored, !token.isEmpty else {
             hasToken = false
             return
         }
