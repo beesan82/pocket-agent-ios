@@ -17,7 +17,7 @@
 - [x] GitHub へ push（`beesan82/pocket-agent-ios`, commit `cc13b32`）
 - [x] CI 初回成功（AT-12）— 2026-10-18、ユーザーが Actions 画面で確認。ログは未取得
 - [ ] 生成された `Package.resolved`（Artifact `ci-evidence`）をコミット
-- [ ] CI ログから実際の Xcode / Swift / シミュレータ版を記録
+- [x] CI ログから実際の Xcode / Swift 版を記録（Xcode 26.6 / Swift 6.3.3、runner macos-26）
 
 ## 0-3 AgentRunKit iOS ビルド
 - [x] `AgentRunKit` と `AgentRunKitFoundationModels` をリンクし、ソースで存在を確認した型だけを参照（`SDKLinkCheck.swift`）
@@ -27,7 +27,7 @@
 - [x] `AgentRunKitTesting.TestLLMClient` の API をソースで確認 → 台本どおりの応答を返せないので不採用（ADR-007）
 - [x] 自前 FakeLLM `ScriptedLLMClient` + `AgentRunner`（`Packages/PocketAgentRuntime`）
 - [x] ツール呼び出し・承認拒否・セッション承認の格下げ・キャンセル・反復上限のテスト（AT-05, 08, 09 の土台）— CI run 39098564327 で 9/9 合格（`swift test`, macOS）
-- [ ] アプリ全体（Xcode）のビルドに PocketAgentRuntime を含めて成功 — 同 run は Package.resolved の表示ステップで停止し未確認
+- [x] アプリ全体（Xcode）のビルドに PocketAgentRuntime を含めて成功 — run 39099104631（commit `8cbde12`）、Xcode 26.6 (17F113) / Swift 6.3.3。Core 8 + Runtime 9 + App 2 テスト合格
 
 ## 0-5 モデル経路 1 往復
 - [ ] ClaudeAdapter: 実 API キー（Keychain 入力）で 1 往復 — 実機
