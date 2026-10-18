@@ -89,11 +89,12 @@ struct PersistenceTests {
         let repo = ConversationRepository(context: context)
         let conversation = try repo.create(choice: .claude)
         try repo.append(ChatTurn(role: .user, text: "hi"), to: conversation, choice: .claude)
-        let notes = SwiftDataNoteStore(modelContainer: container)
+        let journal = SwiftDataJournalStore(modelContainer: container)
+        let notes = JournalNoteStore(journal: journal)
         _ = try await notes.add("memo")
         let credentials = SpyCredentialStore(key: "test-key")
 
-        try await DataReset.eraseAll(context: context, notes: notes, credentials: credentials)
+        try await DataReset.eraseAll(context: context, journal: journal, credentials: credentials)
 
         #expect(try context.fetchCount(FetchDescriptor<ConversationRecord>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<TurnRecord>()) == 0)

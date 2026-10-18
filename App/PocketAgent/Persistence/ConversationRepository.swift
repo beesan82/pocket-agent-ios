@@ -82,11 +82,10 @@ enum DataReset {
     /// the first error is thrown afterwards.
     @MainActor
     static func eraseAll(
-        context: ModelContext, notes: any NoteStore, credentials: any CredentialStore
+        context: ModelContext, journal: any JournalStore, credentials: any CredentialStore
     ) async throws {
         var firstError: Error?
         do { try ConversationRepository(context: context).deleteAll() } catch { firstError = firstError ?? error }
-        do { try await notes.deleteAll() } catch { firstError = firstError ?? error }
         do { try credentials.deleteAPIKey() } catch { firstError = firstError ?? error }
         if let firstError { throw firstError }
     }

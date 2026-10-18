@@ -110,7 +110,7 @@ struct SettingsView: View {
         do {
             try await DataReset.eraseAll(
                 context: modelContext,
-                notes: SwiftDataNoteStore(modelContainer: modelContext.container),
+                journal: SwiftDataJournalStore(modelContainer: modelContext.container),
                 credentials: credentials)
             eraseStatus = "すべてのデータを削除しました"
         } catch {

@@ -51,8 +51,9 @@ final class TurnRecord {
 
 enum AppModelContainer {
     static func make(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema([NoteRecord.self, ConversationRecord.self, TurnRecord.self])
+        let schema = Schema(versionedSchema: PocketAgentSchemaV2.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)
-        return try ModelContainer(for: schema, configurations: [configuration])
+        return try ModelContainer(
+            for: schema, migrationPlan: PocketAgentMigrationPlan.self, configurations: [configuration])
     }
 }
