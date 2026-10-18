@@ -19,6 +19,8 @@ public enum LLMErrorDescriber {
             return "リクエストが混雑しています。しばらく待ってから再試行してください。"
         case let .httpError(statusCode, _):
             return "サーバーエラーが発生しました（HTTP \(statusCode)）。"
+        case let .other(description) where description.contains("exceededContextWindowSize"):
+            return "会話が長くなりすぎました。新しい会話を始めてください。"
         case .networkError:
             return "通信できませんでした。ネットワーク接続を確認してください。"
         default:
