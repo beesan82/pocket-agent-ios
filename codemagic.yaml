@@ -1,0 +1,49 @@
+# Codemagic: signed build → TestFlight (FR-13, AT-13).
+# Started manually from the Codemagic UI only (no `triggering`), to save build minutes.
+#
+# One-time setup (done by the user in Codemagic / App Store Connect; no secrets in this repo):
+#   1. Teams → Integrations → Developer Portal: add an App Store Connect API key
+#      (role: App Manager) and name the integration exactly "Pocket Agent ASC".
+#   2. App Store Connect: create the app record with the bundle ID below,
+#      then put its numeric Apple ID into APP_STORE_APPLE_ID.
+workflows:
+  ios-testflight:
+    name: iOS TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: Pocket Agent ASC
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.pocketagent
+      vars:
+        XCODE_PROJECT: PocketAgent.xcodeproj
+        XCODE_SCHEME: PocketAgent
+        APP_STORE_APPLE_ID: "0000000000"
+      xcode: latest
+    scripts:
+      - name: Generate Xcode project (XcodeGen) with pinned packages
+        script: |
+          brew install xcodegen
+          xcodegen generate
+          mkdir -p "$XCODE_PROJECT/project.xcworkspace/xcshareddata/swiftpm"
+          cp Packages/PocketAgentRuntime/Package.resolved \
+            "$XCODE_PROJECT/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+      - name: Resolve packages
+        script: xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME"
+      - name: Apply signing profiles
+        script: xcode-project use-profiles
+      - name: Set build number (latest TestFlight build + 1)
+        script: |
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          agvtool new-version -all $((LATEST + 1))
+      - name: Build signed ipa
+        script: xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

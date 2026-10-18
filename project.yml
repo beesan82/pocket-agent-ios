@@ -10,6 +10,8 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.0.1"
     CURRENT_PROJECT_VERSION: "1"
+    # Lets Codemagic set the build number with agvtool (codemagic.yaml).
+    VERSIONING_SYSTEM: apple-generic
     DEVELOPMENT_TEAM: ""
 
 packages:
@@ -41,6 +43,9 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Pocket Agent
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        # Only standard HTTPS: exempt from export compliance, so TestFlight does not ask each upload.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
 
   PocketAgentTests:
