@@ -139,6 +139,7 @@ struct JournalPersistenceTests {
         _ = try await journal.add(NewJournalEntry(source: .voice, origin: .journal, body: "日記"))
         _ = try await journal.add(NewJournalEntry(source: .text, origin: .noteTool, body: "メモ"))
         let credentials = SpyCredentialStore(key: "test-key")
+        #expect(try context.fetchCount(FetchDescriptor<JournalEntryRecord>()) == 2)
 
         try await DataReset.eraseAll(context: context, journal: journal, credentials: credentials)
 

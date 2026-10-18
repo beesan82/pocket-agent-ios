@@ -8,7 +8,9 @@ struct NotesView: View {
     @State private var notes: [Note] = []
     @State private var errorText: String?
 
-    private var store: SwiftDataNoteStore { SwiftDataNoteStore(modelContainer: modelContext.container) }
+    private var store: JournalNoteStore {
+        JournalNoteStore(journal: SwiftDataJournalStore(modelContainer: modelContext.container))
+    }
 
     var body: some View {
         List {

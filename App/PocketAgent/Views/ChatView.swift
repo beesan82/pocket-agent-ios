@@ -28,7 +28,7 @@ struct ChatView: View {
             session = ChatSession(
                 conversation: conversation,
                 repository: ConversationRepository(context: modelContext),
-                notes: SwiftDataNoteStore(modelContainer: modelContext.container),
+                notes: JournalNoteStore(journal: SwiftDataJournalStore(modelContainer: modelContext.container)),
                 settings: settings,
                 broker: broker,
                 resolve: ChatSession.liveResolver(

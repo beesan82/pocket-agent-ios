@@ -6,7 +6,7 @@ struct PocketAgentApp: App {
     @State private var settings = ModelSettings()
     @State private var mlxStore: MLXModelStore
     @State private var mlxRuntime: MLXRuntime
-    @State private var container = try? AppModelContainer.make()
+    @State private var container: ModelContainer?
     private let credentials = KeychainCredentialStore()
     private let availability = AppleLocalAvailability()
 
@@ -15,6 +15,13 @@ struct PocketAgentApp: App {
         let store = MLXModelStore()
         _mlxStore = State(initialValue: store)
         _mlxRuntime = State(initialValue: MLXRuntime(store: store))
+
+        let container = try? AppModelContainer.make()
+        if let container {
+            // Once per launch; a failed run leaves its flag unset and retries next launch.
+            try? NoteMigration.migrateOnce(context: container.mainContext, defaults: .standard)
+        }
+        _container = State(initialValue: container)
     }
 
     var body: some Scene {

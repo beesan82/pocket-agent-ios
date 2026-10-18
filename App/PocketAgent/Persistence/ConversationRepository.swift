@@ -78,7 +78,7 @@ final class ConversationRepository {
 }
 
 enum DataReset {
-    /// Erases conversations, notes and the API key. Every step is attempted;
+    /// Erases conversations, the journal (notes included) and the API key. Every step is attempted;
     /// the first error is thrown afterwards.
     @MainActor
     static func eraseAll(
@@ -86,6 +86,7 @@ enum DataReset {
     ) async throws {
         var firstError: Error?
         do { try ConversationRepository(context: context).deleteAll() } catch { firstError = firstError ?? error }
+        do { try await journal.deleteAll() } catch { firstError = firstError ?? error }
         do { try credentials.deleteAPIKey() } catch { firstError = firstError ?? error }
         if let firstError { throw firstError }
     }
