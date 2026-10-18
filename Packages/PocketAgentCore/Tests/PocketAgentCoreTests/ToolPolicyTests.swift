@@ -13,6 +13,11 @@ struct ToolPolicyTests {
         #expect(ToolRisk.appInternalWrite.allowsSessionWideApproval)
     }
 
+    @Test func appInternalDeleteAlwaysAsks() {
+        #expect(ToolRisk.appInternalDelete.requiresApproval)
+        #expect(!ToolRisk.appInternalDelete.allowsSessionWideApproval)
+    }
+
     @Test func limitsDefaultToTenSteps() {
         #expect(AgentLimits().maxSteps == 10)
     }

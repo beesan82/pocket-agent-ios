@@ -6,6 +6,8 @@ public enum ToolRisk: String, Sendable, CaseIterable {
     case readOnly
     /// Writes inside the app sandbox only (e.g. saving a note).
     case appInternalWrite
+    /// Removes data inside the app sandbox (e.g. deleting a note). Approved per call, never session-wide.
+    case appInternalDelete
     /// Leaves the app or reaches another service (e.g. opening LINE's share sheet).
     case externalSideEffect
 

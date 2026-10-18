@@ -190,6 +190,7 @@ struct AgentRunnerTests {
         #expect(AgentRunner<EmptyContext>.sdkDecision(for: .approveOnce, risk: .externalSideEffect) == .approve)
         #expect(AgentRunner<EmptyContext>.sdkDecision(for: .approveForSession, risk: .externalSideEffect) == .approve)
         #expect(AgentRunner<EmptyContext>.sdkDecision(for: .approveForSession, risk: .appInternalWrite) == .approveAlways)
+        #expect(AgentRunner<EmptyContext>.sdkDecision(for: .approveForSession, risk: .appInternalDelete) == .approve)
         #expect(AgentRunner<EmptyContext>.sdkDecision(for: .deny(reason: "no"), risk: .readOnly) == .deny(reason: "no"))
     }
 }
