@@ -24,6 +24,10 @@ enum SpeechAvailability {
     static func reason(
         isAvailable: Bool, supportsJapanese: Bool, assetsInstalled: Bool, permissionGranted: Bool
     ) -> SpeechUnavailableReason? {
-        nil  // RED stub
+        if !isAvailable { return .moduleUnavailable }
+        if !supportsJapanese { return .japaneseUnsupported }
+        if !assetsInstalled { return .assetsNotInstalled }
+        if !permissionGranted { return .permissionDenied }
+        return nil
     }
 }

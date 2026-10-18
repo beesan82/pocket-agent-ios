@@ -64,6 +64,8 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         # Only standard HTTPS: exempt from export compliance, so TestFlight does not ask each upload.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: 日誌を音声で記録するためにマイクを使用します
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: 録音した音声を端末内で文字に起こすために使用します
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
 
