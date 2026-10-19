@@ -8,7 +8,7 @@ import PocketAgentRuntime
 @Observable
 final class AskSession {
     enum Phase: Equatable {
-        case idle, searching, answering, done, failed(String)
+        case idle, searching, answering, done, stopped, failed(String)
     }
 
     static let failedText = "回答を作成できませんでした。もう一度お試しください。"

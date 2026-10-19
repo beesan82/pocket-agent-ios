@@ -77,6 +77,9 @@ final class JournalCaptureSession {
         }
     }
 
+    /// RED stub.
+    func summarize() {}
+
     /// Stops a running summary; a partial summary stays editable, otherwise back to editing.
     func stopSummary() {
         guard phase == .summarizing else { return }
