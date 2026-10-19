@@ -1,7 +1,7 @@
 import PocketAgentCore
 import SwiftUI
 
-/// Navigation root: the conversation list is home.
+/// Navigation root: the tabs (journal is home).
 struct ContentView: View {
     let settings: ModelSettings
     let credentials: any CredentialStore
@@ -11,15 +11,12 @@ struct ContentView: View {
     let measurementLog: MeasurementLog
     let developer: DeveloperSettings
     let tokenStore: any CredentialStore
-
-    @State private var path = NavigationPath()
+    let journal: any JournalStore
 
     var body: some View {
-        NavigationStack(path: $path) {
-            ConversationListView(
-                path: $path, settings: settings, credentials: credentials, availability: availability,
-                mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
-                developer: developer, tokenStore: tokenStore)
-        }
+        RootTabView(
+            settings: settings, credentials: credentials, availability: availability,
+            mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
+            developer: developer, tokenStore: tokenStore, journal: journal)
     }
 }

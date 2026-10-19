@@ -8,6 +8,7 @@ struct ChatView: View {
     let settings: ModelSettings
     let credentials: any CredentialStore
     let availability: any ModelAvailabilityChecking
+    let journal: any JournalStore
 
     @Environment(\.modelContext) private var modelContext
     @State private var session: ChatSession?
@@ -28,7 +29,7 @@ struct ChatView: View {
             session = ChatSession(
                 conversation: conversation,
                 repository: ConversationRepository(context: modelContext),
-                notes: JournalNoteStore(journal: SwiftDataJournalStore(modelContainer: modelContext.container)),
+                notes: JournalNoteStore(journal: journal),
                 settings: settings,
                 broker: broker,
                 resolve: ChatSession.liveResolver(

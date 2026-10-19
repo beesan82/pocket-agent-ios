@@ -12,6 +12,7 @@ struct ConversationListView: View {
     let measurementLog: MeasurementLog
     let developer: DeveloperSettings
     let tokenStore: any CredentialStore
+    let journal: any JournalStore
 
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ConversationRecord.updatedAt, order: .reverse) private var conversations: [ConversationRecord]
@@ -43,25 +44,19 @@ struct ConversationListView: View {
         .navigationDestination(for: ConversationRecord.self) { conversation in
             ChatView(
                 conversation: conversation, settings: settings,
-                credentials: credentials, availability: availability)
+                credentials: credentials, availability: availability, journal: journal)
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                NavigationLink {
-                    NotesView()
-                } label: {
-                    Text("メモ")
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     SettingsView(
                         settings: settings, credentials: credentials, availability: availability,
                         mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
-                        developer: developer, tokenStore: tokenStore)
+                        developer: developer, tokenStore: tokenStore, journal: journal)
                 } label: {
-                    Text("設定")
+                    Image(systemName: "gearshape")
                 }
+                .accessibilityLabel("設定")
             }
             ToolbarItem(placement: .bottomBar) {
                 Button("新しい会話", systemImage: "square.and.pencil") { create() }

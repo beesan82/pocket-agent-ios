@@ -7,6 +7,8 @@ struct PocketAgentApp: App {
     @State private var mlxStore: MLXModelStore
     @State private var mlxRuntime: MLXRuntime
     @State private var container: ModelContainer?
+    /// The one journal store for the app (a second instance could hand out duplicate sequences).
+    @State private var journal: SwiftDataJournalStore?
     private let credentials = KeychainCredentialStore()
     private let availability = AppleLocalAvailability()
     private let measurementLog = MeasurementLog()
@@ -26,15 +28,16 @@ struct PocketAgentApp: App {
             try? NoteMigration.migrateOnce(context: container.mainContext, defaults: .standard)
         }
         _container = State(initialValue: container)
+        _journal = State(initialValue: container.map { SwiftDataJournalStore(modelContainer: $0) })
     }
 
     var body: some Scene {
         WindowGroup {
-            if let container {
+            if let container, let journal {
                 ContentView(
                     settings: settings, credentials: credentials, availability: availability,
                     mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
-                    developer: developer, tokenStore: tokenStore)
+                    developer: developer, tokenStore: tokenStore, journal: journal)
                     .modelContainer(container)
             } else {
                 // Fixed text: the underlying error is never shown.
