@@ -79,8 +79,7 @@ struct JournalCaptureSessionTests {
 
     @Test func backgroundBlocksAutoSummary() async throws {
         let store = InMemoryJournalStore()
-        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 来月
-会議で来月の計画を話した。"])
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 来月\n会議で来月の計画を話した。"])
         let session = JournalCaptureSession(source: .voice, store: store, assistant: assistant, modelReady: true)
         session.transcript = Self.longText
 
@@ -93,8 +92,7 @@ struct JournalCaptureSessionTests {
 
     @Test func foregroundStillAutoSummarizes() async throws {
         let store = InMemoryJournalStore()
-        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 来月
-会議で来月の計画を話した。"])
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 来月\n会議で来月の計画を話した。"])
         let session = JournalCaptureSession(source: .voice, store: store, assistant: assistant, modelReady: true)
         session.transcript = Self.longText
 
