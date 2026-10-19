@@ -21,6 +21,10 @@ struct JournalCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var session: JournalCaptureSession?
     @State private var manualTask: Task<Void, Never>?
+    /// The first load and automatic summary; cancelled when the app leaves the foreground.
+    @State private var startTask: Task<Void, Never>?
+    @State private var isForeground = true
+    @Environment(\.scenePhase) private var scenePhase
     @State private var confirmDiscard = false
 
     /// Text that would be lost on close; the sheet only closes after asking.
@@ -57,7 +61,12 @@ struct JournalCaptureView: View {
         }
         .interactiveDismissDisabled(session?.phase == .saving || hasUnsavedText)
         .stopsJournalGeneration(runtime: mlxRuntime) { stopGeneration() }
-        .task { await start() }
+        .task {
+            isForeground = scenePhase == .active
+            guard startTask == nil else { return }
+            startTask = Task { await start() }
+        }
+        .onChange(of: scenePhase) { _, phase in isForeground = phase == .active }
         .onChange(of: session?.phase) { _, phase in
             if phase == .saved {
                 onSaved()
@@ -69,6 +78,7 @@ struct JournalCaptureView: View {
 
     /// Ends a model load started by 「要約する」 and a running summary; the texts stay.
     private func stopGeneration() {
+        startTask?.cancel()
         manualTask?.cancel()
         manualTask = nil
         session?.stopSummary()
@@ -85,7 +95,7 @@ struct JournalCaptureView: View {
             guard let client else { return }
             session.assistant = JournalModelAccess.assistant(client: client)
             session.modelReady = true
-            session.summarize()
+            session.summarize(isForeground: isForeground)
         }
     }
 
@@ -98,7 +108,7 @@ struct JournalCaptureView: View {
         created.transcript = request.transcript
         session = created
         if client != nil {
-            created.beginIfNeeded()
+            created.beginIfNeeded(isForeground: isForeground)
             return
         }
         // Long enough to summarize: load the downloaded model once, then summarize.
@@ -109,7 +119,7 @@ struct JournalCaptureView: View {
         else { return }
         created.assistant = JournalModelAccess.assistant(client: loaded)
         created.modelReady = true
-        created.beginIfNeeded()
+        created.beginIfNeeded(isForeground: isForeground)
     }
 }
 
