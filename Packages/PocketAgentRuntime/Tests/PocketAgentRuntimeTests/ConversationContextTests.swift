@@ -164,7 +164,7 @@ struct ConversationContextTests {
     @Test func totalLimitDropsJournalBeforeNotes() {
         let limit = MemoryInjectionLimit(
             maxNotes: 10, maxCharactersPerNote: nil, maxJournalEntries: 10,
-            maxCharactersPerJournalEntry: nil, maxTotalCharacters: 120)
+            maxCharactersPerJournalEntry: nil, maxTotalCharacters: 160)
         let items = [
             note("n1", day: 3),
             diary(String(repeating: "j", count: 60), title: nil, day: 2),
@@ -172,7 +172,7 @@ struct ConversationContextTests {
         ]
         let text = ConversationContext.memorySection(memory: items, limit: limit, timeZone: utc)!
         #expect(text.contains("n1") && text.contains("jjj") && !text.contains("kkk"))
-        #expect(text.count <= 120)
+        #expect(text.count <= 160)
     }
 
     @Test func claudeSystemPromptAppendsMemory() {
@@ -182,11 +182,11 @@ struct ConversationContextTests {
     }
 
     @Test func appleLocalPromptPutsMemoryFirstAndShrinksHistoryBudget() {
-        let memory = String(repeating: "m", count: 3000)
+        let memory = String(repeating: "m", count: 3200)
         let turns = [user("古い"), assistant(String(repeating: "y", count: 900)), user("近い")]
         let prompt = ConversationContext.appleLocalPrompt(history: turns, message: "今", memorySection: memory)
         #expect(prompt.hasPrefix(memory + "\n\n"))
-        #expect(prompt.contains("ユーザー: 近い") && !prompt.contains("yyy")) // 3000 + 900 > 4000: newest turn only
+        #expect(prompt.contains("ユーザー: 近い") && !prompt.contains("yyy")) // history budget 4000 - 3200 = 800 < 902: newest turn only
         #expect(prompt.hasSuffix("今回のメッセージ:\n今"))
         #expect(ConversationContext.appleLocalPrompt(history: [], message: "今", memorySection: "M") == "M\n\n今")
         #expect(ConversationContext.appleLocalPrompt(history: turns, message: "今", memorySection: nil)
