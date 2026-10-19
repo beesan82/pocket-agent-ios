@@ -69,11 +69,13 @@ final class AskSession {
         }
     }
 
-    /// Cancels the running question; what has been answered so far stays on screen.
+    /// Cancels the running question. The partial answer stays on screen, marked `.stopped`
+    /// so it never looks complete; later chunks are ignored.
     func stop() {
+        let wasRunning = isRunning
         generation += 1
         askTask?.cancel()
         askTask = nil
-        if isRunning { phase = answer.isEmpty ? .idle : .done }
+        if wasRunning { phase = .stopped }
     }
 }

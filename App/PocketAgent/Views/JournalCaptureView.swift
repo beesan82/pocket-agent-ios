@@ -20,6 +20,7 @@ struct JournalCaptureView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var session: JournalCaptureSession?
+    @State private var manualTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -27,7 +28,7 @@ struct JournalCaptureView: View {
                 if let session {
                     CaptureForm(
                         session: session, mlxStore: mlxStore, mlxRuntime: mlxRuntime,
-                        measurementLog: measurementLog)
+                        measurementLog: measurementLog, onSummarize: summarizeManually)
                 } else {
                     ProgressView()
                 }
@@ -48,7 +49,26 @@ struct JournalCaptureView: View {
                 dismiss()
             }
         }
-        .onDisappear { session?.stopSummary() }
+        .onDisappear {
+            manualTask?.cancel()
+            manualTask = nil
+            session?.stopSummary()
+        }
+    }
+
+    /// 「要約する」: loads the downloaded model if needed, then summarizes without the length threshold.
+    private func summarizeManually() {
+        guard let session else { return }
+        manualTask?.cancel()
+        manualTask = Task {
+            let client = await JournalModelAccess.client(store: mlxStore, runtime: mlxRuntime)
+            guard !Task.isCancelled else { return }
+            manualTask = nil
+            guard let client else { return }
+            session.assistant = JournalAssistant(client: client)
+            session.modelReady = true
+            session.summarize()
+        }
     }
 
     private func start() async {
@@ -80,12 +100,13 @@ private struct CaptureForm: View {
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
+    let onSummarize: () -> Void
 
     private var isSummarizing: Bool { session.phase == .summarizing }
     private var isBusy: Bool { session.phase == .saving }
-    private var isLong: Bool {
-        session.transcript.trimmingCharacters(in: .whitespacesAndNewlines).count
-            >= SummaryPolicy.autoSummarizeThreshold
+    /// Loaded, or downloaded and loadable on tap; otherwise the status view shows why not.
+    private var canSummarize: Bool {
+        mlxRuntime.client != nil || JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == nil
     }
 
     var body: some View {
@@ -116,12 +137,20 @@ private struct CaptureForm: View {
                 } footer: {
                     Text("「保存」で要約を本文として、原文と一緒に保存します。")
                 }
-            } else if isLong && session.phase == .editing {
-                Section("要約") {
+            }
+
+            if !isSummarizing {
+                Section {
+                    Button("要約する") { onSummarize() }
+                        .disabled(isBusy || isEmpty || !canSummarize || mlxRuntime.state == .loading)
                     JournalModelStatusView(store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog)
-                    if mlxRuntime.client == nil, mlxRuntime.state != .loading {
+                    if !canSummarize {
                         Text("要約せずに保存できます。").font(.footnote).foregroundStyle(.secondary)
                     }
+                } header: {
+                    Text("要約")
+                } footer: {
+                    Text("要約は端末内のモデルで行い、外部へ送信しません。")
                 }
             }
 

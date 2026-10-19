@@ -45,13 +45,29 @@ final class JournalCaptureSession {
 
     /// Starts the summary when the text is long enough and the model is ready (once per capture).
     func beginIfNeeded() {
-        guard phase == .editing, !hasSummary, summaryTask == nil, let assistant else { return }
+        guard phase == .editing, !hasSummary, summaryTask == nil, assistant != nil else { return }
         let input = trimmedTranscript
         guard SummaryPolicy.shouldSummarize(text: input, modelReady: modelReady) else { return }
+        startSummary(input)
+    }
 
+    /// The user's 「要約する」: any non-empty text, also to re-run a summary. Needs a ready model.
+    func summarize() {
+        switch phase {
+        case .summarizing, .saving, .saved: return
+        case .editing, .summarized, .failed: break
+        }
+        let input = trimmedTranscript
+        guard modelReady, assistant != nil, !input.isEmpty else { return }
+        startSummary(input)
+    }
+
+    private func startSummary(_ input: String) {
+        guard let assistant else { return }
         generation += 1
         let current = generation
         phase = .summarizing
+        hasSummary = false
         summaryBody = ""
         summaryTitle = ""
         let stream = assistant.summarize(input)
@@ -76,9 +92,6 @@ final class JournalCaptureSession {
             }
         }
     }
-
-    /// RED stub.
-    func summarize() {}
 
     /// Stops a running summary; a partial summary stays editable, otherwise back to editing.
     func stopSummary() {

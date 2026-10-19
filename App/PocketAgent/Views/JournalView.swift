@@ -14,6 +14,8 @@ struct JournalView: View {
     @State private var query = ""
     @State private var input = ""
     @State private var listError: String?
+    /// Kept apart from `listError` so the reload after a failed delete does not hide it.
+    @State private var deleteError: String?
     @State private var speech = SpeechCapture()
     @State private var speechMessage: String?
     @State private var confirmInstall = false
@@ -27,6 +29,9 @@ struct JournalView: View {
             if let listError {
                 Text(listError).foregroundStyle(.red)
             }
+            if let deleteError {
+                Text(deleteError).foregroundStyle(.red)
+            }
             if loaded, entries.isEmpty, listError == nil {
                 Text(isSearching ? "見つかりませんでした。" : "日誌はまだありません。下の録音ボタンかテキスト欄から記録しましょう。")
                     .foregroundStyle(.secondary)
@@ -39,6 +44,8 @@ struct JournalView: View {
                         } label: {
                             JournalRow(entry: entry)
                         }
+                        // A push would end the recording (onDisappear).
+                        .disabled(isRecordingBusy)
                     }
                     .onDelete { offsets in delete(offsets.map { section.entries[$0].id }) }
                 }
@@ -54,6 +61,7 @@ struct JournalView: View {
                     Image(systemName: "gearshape")
                 }
                 .accessibilityLabel("設定")
+                .disabled(isRecordingBusy)
             }
         }
         .safeAreaInset(edge: .bottom) { recorder }
@@ -129,9 +137,11 @@ struct JournalView: View {
         Task {
             do {
                 for id in ids { _ = try await journal.delete(id: id) }
+                deleteError = nil
             } catch {
-                listError = "日誌を削除できませんでした。"
+                deleteError = "日誌を削除できませんでした。"
             }
+            // Reload either way: a partial delete must show what is really left.
             reloadToken += 1
         }
     }
@@ -228,22 +238,26 @@ struct JournalView: View {
     }
 
     private func stopRecording() {
+        let wasRecording = speech.state == .recording
         Task {
             await speech.stop()
-            openCaptureFromSpeech()
+            openCaptureFromSpeech(wasRecording: wasRecording)
         }
     }
 
     /// Leaving the tab ends the recording; what was recognized still opens for saving.
     private func stopRecordingOnLeave() {
         guard isRecordingBusy else { return }
+        let wasRecording = speech.state == .recording
         Task {
             await speech.stop()
-            openCaptureFromSpeech()
+            openCaptureFromSpeech(wasRecording: wasRecording)
         }
     }
 
-    private func openCaptureFromSpeech() {
+    /// Stopped during preparation (nothing recorded): just back to idle, no message.
+    private func openCaptureFromSpeech(wasRecording: Bool) {
+        guard wasRecording else { return }
         guard case .idle = speech.state else { return }  // a failure is shown by `speech.state`
         let text = speech.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {

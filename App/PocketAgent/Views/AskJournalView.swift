@@ -106,6 +106,9 @@ struct AskJournalView: View {
             } else if session.phase == .answering {
                 ProgressView()
             }
+            if session.phase == .stopped {
+                Text("（停止しました）").foregroundStyle(.secondary)
+            }
             if case let .failed(text) = session.phase {
                 Text(text).foregroundStyle(.red)
             }
