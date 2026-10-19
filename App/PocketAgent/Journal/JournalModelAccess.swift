@@ -5,6 +5,8 @@ import SwiftUI
 /// The on-device model as the journal screens see it. "Ready" means a loaded client.
 @MainActor
 enum JournalModelAccess {
+    static var journalCalendar: Calendar { Calendar.current }
+
     static func reason(store: MLXModelStore, runtime: MLXRuntime) -> ModelUnavailableReason? {
         MLXAvailability.reason(state: runtime.state, status: store.status(of: store.selected))
     }

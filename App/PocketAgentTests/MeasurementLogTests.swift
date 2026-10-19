@@ -45,6 +45,23 @@ struct MeasurementLogTests {
         #expect(MeasurementLog(fileURL: url).entries.isEmpty)
     }
 
+    @Test func clearRemovesPersistedFileContent() {
+        let url = tempURL()
+        let log = MeasurementLog(fileURL: url)
+        log.append("音声テストの内容")
+        #expect(FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
+        log.clear()
+        #expect(!FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
+    }
+
+    @Test func logFileIsExcludedFromBackup() throws {
+        let url = tempURL()
+        let log = MeasurementLog(fileURL: url)
+        log.append("a")
+        let values = try url.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        #expect(values.isExcludedFromBackup == true)
+    }
+
     @Test func persistsAcrossInstances() {
         let url = tempURL()
         let first = MeasurementLog(fileURL: url)

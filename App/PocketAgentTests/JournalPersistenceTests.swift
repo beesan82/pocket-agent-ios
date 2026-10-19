@@ -83,13 +83,24 @@ struct JournalPersistenceTests {
         #expect(try await store.search("  ").map(\.id) == [other.id, titled.id])
     }
 
+    @Test func searchFindsWordsOnlyInTranscript() async throws {
+        let store = SwiftDataJournalStore(modelContainer: container)
+        let summarized = try await store.add(NewJournalEntry(
+            source: .voice, origin: .journal, body: "散歩した", transcript: "公園でコーヒーを飲んだ", title: "朝"))
+        _ = try await store.add(NewJournalEntry(source: .text, origin: .journal, body: "会議"))
+        #expect(try await store.search("コーヒー").map(\.id) == [summarized.id])
+    }
+
     @Test func migrationCopiesAndDeletesOnce() async throws {
         let context = container.mainContext
         let defaults = try makeDefaults()
         let olderDate = Date(timeIntervalSince1970: 1_700_000_000)
         let newerDate = Date(timeIntervalSince1970: 1_700_000_100)
-        context.insert(NoteRecord(text: "古いメモ", createdAt: olderDate))
-        context.insert(NoteRecord(text: "新しいメモ", createdAt: newerDate))
+        let older = NoteRecord(text: "古いメモ", createdAt: olderDate)
+        let newer = NoteRecord(text: "新しいメモ", createdAt: newerDate)
+        let noteIDs = [newer.id, older.id]
+        context.insert(older)
+        context.insert(newer)
         try context.save()
 
         try NoteMigration.migrateOnce(context: context, defaults: defaults)
@@ -100,6 +111,7 @@ struct JournalPersistenceTests {
         let entries = try await journal.all()
         #expect(entries.map(\.body) == ["新しいメモ", "古いメモ"])
         #expect(entries.map(\.createdAt) == [newerDate, olderDate])
+        #expect(entries.map(\.id) == noteIDs)
         #expect(entries.allSatisfy { $0.source == .text && $0.origin == .noteTool })
         let notes = JournalNoteStore(journal: journal)
         #expect(try await notes.all().map(\.text) == ["新しいメモ", "古いメモ"])
@@ -131,6 +143,40 @@ struct JournalPersistenceTests {
         #expect(try context.fetchCount(FetchDescriptor<NoteRecord>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<JournalEntryRecord>()) == 1)
         #expect(defaults.bool(forKey: "pocketagent.notesMigrated"))
+    }
+
+    /// A run whose first save (the copies) landed but whose delete did not: the retry updates the
+    /// copy with the same id instead of adding a second entry.
+    @Test func migrationRetryAfterPartialSaveUpserts() async throws {
+        let context = container.mainContext
+        let defaults = try makeDefaults()
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let note = NoteRecord(text: "途中のメモ", createdAt: date)
+        context.insert(note)
+        context.insert(JournalEntryRecord(
+            id: note.id, createdAt: date, sequence: 1, sourceRaw: "text", originRaw: "noteTool", body: "途中のメモ"))
+        try context.save()
+
+        try NoteMigration.migrateOnce(context: context, defaults: defaults)
+
+        #expect(try context.fetchCount(FetchDescriptor<JournalEntryRecord>()) == 1)
+        #expect(try context.fetchCount(FetchDescriptor<NoteRecord>()) == 0)
+        #expect(defaults.bool(forKey: "pocketagent.notesMigrated"))
+        let journal = SwiftDataJournalStore(modelContainer: container)
+        #expect(try await journal.all().map(\.id) == [note.id])
+    }
+
+    @Test func eraseAllRemovesLeftoverNoteRecords() async throws {
+        let context = container.mainContext
+        let journal = SwiftDataJournalStore(modelContainer: container)
+        context.insert(NoteRecord(text: "移行前のメモ", createdAt: Date()))
+        try context.save()
+
+        try await DataReset.eraseAll(
+            context: context, journal: journal, credentials: SpyCredentialStore(key: "test-key"),
+            githubToken: SpyCredentialStore(key: "test-token-123"))
+
+        #expect(try context.fetchCount(FetchDescriptor<NoteRecord>()) == 0)
     }
 
     @Test func eraseAllRemovesJournal() async throws {
