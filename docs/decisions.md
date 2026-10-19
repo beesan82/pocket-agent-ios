@@ -130,3 +130,49 @@
 ## 未決定
 - 永続化: SwiftData を Phase 1 で採用（設計書）。
 - Bundle ID: `com.beesan82.pocketagent`（2026-10-18 決定、ユーザー承認）。Team ID はリポジトリに書かず、Codemagic の自動署名がプロファイルから設定する。
+
+## ADR-020 MLX は generate/stream を直接呼び、AgentRunner を通さない
+- 決定: 端末内 MLX（日誌の要約・質問回答）は `MLXClient` の `generate` / `stream` を直接呼ぶ。`AgentRunner` には載せない。
+- 理由: `MLXClient` は `ContentOnlyTerminatingClient` ではなく、`AgentRunner` の終了判定に合わない。日誌は 1 回の要約／回答でツール往復が不要（設計書 Phase 2）。
+- 影響要件: FR-15, AT-15
+- 状態: 採用（実機の要約は 3/6/12 秒で動作確認、`docs/phase2-mlx-eval.md`。日誌画面からの生成は実機未検証）
+
+## ADR-021 Phase 2 のプライバシー境界: 日誌は端末内のみ、Claude のノートツールは `.noteTool` だけを見る
+- 決定: `.journal` 由来のエントリは端末内（MLX）でのみ扱う。Claude に渡るノートツール（`list_notes` / `search_notes` 等）は `JournalNoteStore` の射影で `origin == .noteTool` のエントリだけを見る。
+- 理由: 録音の文字起こしを無断でクラウドへ送らない（CLAUDE.md、AT-14）。
+- 検証: `JournalPersistenceTests.noteToolsSeeOnlyNoteToolEntries`、`noteProjectionAddsAsNoteTool`（CI run 39284990942 を含む緑のラン）。
+- 後続の設計: 別セッションの設計（commit `f1a8a4b`、`8102472`「user decision」）は、`.journal` エントリを記憶の注入および list/search 経由で Claude へ送る意図を持つ。**この境界は Phase 2 時点の状態であり、その設計が実装された時点で置き換えられる**（実装されるまでは本 ADR が現行）。
+- 影響要件: FR-15, AT-14
+- 状態: 採用（Phase 2 時点。後続設計で置換予定）
+
+## ADR-022 質問は 2 段階: 日付範囲を母集合とし、語は絞り込みだけに使う
+- 決定: 1 段目で相対日付（先週・一昨日など）を範囲に解決し、その範囲を母集合とする。検索語は母集合を絞り込むだけで、語で母集合を広げない。ヒットが無い場合は直近 10 件へフォールバックし、画面上でそれと分かる表示を付ける。
+- 理由: 小型モデルの語抽出は不安定。範囲が確定していれば語の失敗が致命的にならない。フォールバックを明示して根拠のない回答を避ける。
+- 影響要件: FR-15
+- 状態: 採用（自動テストは Core 68 件に含む。実機での「先週」・キーワード・ヒット無しは未検証）
+
+## ADR-023 モデルのダウンロード方針
+- 決定: ダウンロードは画面のタップでのみ開始し、確認を出す。空き容量はモデルサイズの 1.5 倍を要求する（`DiskSpaceRule`）。ダウンロードはフォアグラウンドのみ、Wi-Fi 推奨を案内する。読み込みはローカルディレクトリ（`ModelConfiguration(directory:)`、Hub はオフラインモード）から行い、読み込み時にネットワークへ接続しない。
+- 理由: 端末内推論の選択時に無断通信をしない（CLAUDE.md）。id 指定の読み込みは Hub へ再問い合わせし得るため退けた（Task 4 レビュー）。
+- 影響要件: FR-15, AT-14, AT-15
+- 状態: 採用（機内モードでの読み込みは実機未検証）
+
+## ADR-024 既定モデルは Qwen2.5-1.5B-Instruct-4bit（実機ゲートの結果）
+- 決定: 既定は `mlx-community/Qwen2.5-1.5B-Instruct-4bit`。
+- 理由（iPhone 15、TestFlight ビルド 5、2026-10-19、`docs/phase2-mlx-eval.md` 測定 2）: 短文 3.0 秒 / 中文 6.0 秒 / 長文 12.0 秒、18〜30 tok/s、読み込み後 831 MB、メモリ警告なし、「見出し:」形式に従う。
+- 見送り: Qwen3 1.7B（測定 1）は thinking 出力で maxTokens を使い切り 25〜30 秒・見出し欠落、測定中にメモリ警告。thinking 無効化を確認できるまで既定にしない（非既定の候補として残す）。
+- 影響要件: FR-15, AT-15
+- 状態: 採用（要約本文の品質は実使用で未確認）
+
+## ADR-025 SwiftData を VersionedSchema V1→V2 にし、NoteRecord を一度だけ移行
+- 決定: スキーマを `VersionedSchema` の V1→V2 とし、起動時に `NoteRecord` を日誌エントリへ一度だけ移行する。id は保持する。移行が途中で失敗しても再試行できるよう upsert する。「全データ削除」は移行後に残った `NoteRecord` も削除する。
+- 理由: 既存メモを失わない。部分的に保存された後の再試行で重複させない。失敗した移行の残骸が全削除後も残るプライバシー上の穴を塞ぐ（最終レビュー I3）。
+- 検証: `migrationCopiesAndDeletesOnce`（id 保持の検証を含む）、`migrationFailureKeepsNotes`、`migrationRetryAfterPartialSaveUpserts`、`eraseAllRemovesLeftoverNoteRecords`（CI run 39284990942）。
+- 影響要件: FR-10, AT-10
+- 状態: 採用（ビルド 5 のストアが V2 で開けたことは暗黙の確認のみ。既存メモありの実移行は実機未検証）
+
+## ADR-026 デバッグ経路: 測定ログ、開発者モードの Issue 送信、TestFlight フィードバック
+- 決定: (1) 測定ログをアプリ内で保持しコピー／共有できる（「全データ削除」で消える。バックアップ対象外）。(2) 開発者モードで、測定ログを非公開リポジトリの GitHub Issue へ送信できる。トークンは Keychain に保存し、送信前に対象リポジトリが private であることを API で確認して、そうでなければ拒否する。「全データ削除」でトークン削除と開発者モード解除も行う。(3) TestFlight のフィードバックは `tools/asc_feedback.py` で読む。App Store Connect の API キー（Developer ロール）はリポジトリの外に置く。
+- 理由: Windows のみの環境で実機の結果を回収するため。ログには文字起こし本文を入れず、件数などの測定値のみとする。
+- 影響要件: 要件の秘密情報の扱い（CLAUDE.md）、AT-11
+- 状態: 採用（実際の GitHub API に対する送信、トークン権限、private 判定は実機未検証。Issue 送信は成功の確認なし）
