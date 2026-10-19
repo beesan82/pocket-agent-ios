@@ -27,7 +27,7 @@ final class ChatSession {
 
     @ObservationIgnored private let conversation: ConversationRecord
     @ObservationIgnored private let repository: ConversationRepository
-    @ObservationIgnored private let notes: any NoteStore
+    @ObservationIgnored private let notes: any MemoryStore
     @ObservationIgnored private let settings: ModelSettings
     @ObservationIgnored private let resolve: ClientResolver
     @ObservationIgnored private let approvalHandler: ToolApprovalGate.ApprovalHandler
@@ -36,7 +36,7 @@ final class ChatSession {
     init(
         conversation: ConversationRecord,
         repository: ConversationRepository,
-        notes: any NoteStore,
+        notes: any MemoryStore,
         settings: ModelSettings,
         broker: ApprovalBroker,
         resolve: @escaping ClientResolver
@@ -87,9 +87,10 @@ final class ChatSession {
         // Tool placement follows the choice: on-device tools run inside the client's
         // session, so they are gated there and the runner gets none.
         let handler = approvalHandler
+        let tools = NoteTools.make(store: notes, limit: choice == .claude ? .claude : .appleLocal)
         let appleLocalTools: [any AnyTool<EmptyContext>] = switch choice {
         case .claude: []
-        case .appleLocal: ToolApprovalGate.wrap(NoteTools.make(store: notes, limit: .appleLocal), approval: handler)
+        case .appleLocal: ToolApprovalGate.wrap(tools, approval: handler)
         }
         let client: any LLMClient
         switch resolve(choice, appleLocalTools) {
@@ -101,7 +102,7 @@ final class ChatSession {
         }
 
         let runnerTools: [RegisteredTool<EmptyContext>] = switch choice {
-        case .claude: NoteTools.make(store: notes, limit: .claude)
+        case .claude: tools
         case .appleLocal: []
         }
         // The on-device client accepts only system messages plus one user message
@@ -154,10 +155,18 @@ final class ChatSession {
     }
 
     /// What the approval sheet says the tool will do.
-    nonisolated static func summary(for request: PendingApproval, notes: any NoteStore) async -> String {
+    nonisolated static func summary(for request: PendingApproval, notes: any MemoryStore) async -> String {
         switch request.toolName {
         case NoteToolName.save:
             return decodeArguments(SaveNoteArguments.self, request.arguments)?.text ?? request.arguments
+        case NoteToolName.edit:
+            guard let arguments = decodeArguments(EditNoteArguments.self, request.arguments) else {
+                return request.arguments
+            }
+            guard let id = UUID(uuidString: arguments.id),
+                  let old = try? await notes.note(id: id)
+            else { return notFoundSummary }
+            return "\(old.text) → \(arguments.text)"
         case NoteToolName.delete:
             guard let arguments = decodeArguments(DeleteNoteArguments.self, request.arguments),
                   let id = UUID(uuidString: arguments.id),
@@ -171,6 +180,11 @@ final class ChatSession {
 }
 
 private struct SaveNoteArguments: Decodable {
+    let text: String
+}
+
+private struct EditNoteArguments: Decodable {
+    let id: String
     let text: String
 }
 

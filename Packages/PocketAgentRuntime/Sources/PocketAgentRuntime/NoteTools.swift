@@ -17,6 +17,7 @@ public struct NoteResultLimit: Sendable {
 
 public enum NoteToolName {
     public static let save = "save_note"
+    public static let edit = "edit_note"
     public static let list = "list_notes"
     public static let search = "search_notes"
     public static let delete = "delete_note"
@@ -31,7 +32,7 @@ public enum NoteToolName {
 public enum NoteTools {
     public static let maxNoteLength = 2000
 
-    public static func make(store: any NoteStore, limit: NoteResultLimit) -> [RegisteredTool<EmptyContext>] {
+    public static func make(store: any MemoryStore, limit: NoteResultLimit) -> [RegisteredTool<EmptyContext>] {
         [
             RegisteredTool(NoteTool(
                 name: NoteToolName.save,
@@ -51,13 +52,34 @@ public enum NoteTools {
                 }
             }, risk: .appInternalWrite),
             RegisteredTool(NoteTool(
+                name: NoteToolName.edit,
+                description: "保存済みのメモ 1 件の本文を書き換える。list_notes / search_notes で得た id を指定する。"
+                    + "保存前にユーザーの承認が必要。",
+                schema: EditNoteArgs.jsonSchema,
+                isReadOnly: false
+            ) { arguments in
+                guard let args = decode(EditNoteArgs.self, arguments),
+                      let id = UUID(uuidString: args.id)
+                else { return invalidArguments }
+                let text = args.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard (1 ... maxNoteLength).contains(text.count) else {
+                    return .error("メモは1〜\(maxNoteLength)文字で指定してください")
+                }
+                return try await guarded("メモを書き換えできませんでした") {
+                    guard let note = try await store.update(id: id, text: text) else {
+                        return try await missingOrJournal(id, in: store)
+                    }
+                    return try encode(SavedNote(id: note.id.uuidString, text: note.text))
+                }
+            }, risk: .appInternalWrite),
+            RegisteredTool(NoteTool(
                 name: NoteToolName.list,
                 description: "保存済みのメモを新しい順に一覧する。",
                 schema: ListNotesArgs.jsonSchema,
                 isReadOnly: true
             ) { _ in
                 try await guarded("メモを読み込めませんでした") {
-                    try encodeList(try await store.all(), limit: limit)
+                    try encodeList(try await store.allMemory(), limit: limit)
                 }
             }, risk: .readOnly),
             RegisteredTool(NoteTool(
@@ -68,7 +90,7 @@ public enum NoteTools {
             ) { arguments in
                 guard let args = decode(SearchNotesArgs.self, arguments) else { return invalidArguments }
                 return try await guarded("メモを検索できませんでした") {
-                    try encodeList(try await store.search(args.query), limit: limit)
+                    try encodeList(try await store.searchMemory(args.query), limit: limit)
                 }
             }, risk: .readOnly),
             RegisteredTool(NoteTool(
@@ -82,7 +104,7 @@ public enum NoteTools {
                 else { return invalidArguments }
                 return try await guarded("メモを削除できませんでした") {
                     guard try await store.delete(id: id) else {
-                        return .error("該当するメモがありません")
+                        return try await missingOrJournal(id, in: store)
                     }
                     return try encode(DeleteResult(deleted: true))
                 }
@@ -119,7 +141,15 @@ public enum NoteTools {
         return .success(String(decoding: try encoder.encode(value), as: UTF8.self))
     }
 
-    private static func encodeList(_ notes: [Note], limit: NoteResultLimit) throws -> ToolResult {
+    /// The error for an id that `update` / `delete` did not touch: journal entries are read-only here.
+    private static func missingOrJournal(_ id: UUID, in store: any MemoryStore) async throws -> ToolResult {
+        let isJournal = try await store.allMemory().contains { $0.id == id && $0.kind == .journal }
+        return .error(isJournal
+            ? "日誌はチャットからは編集・削除できません。日誌タブで操作してください"
+            : "該当するメモがありません")
+    }
+
+    private static func encodeList(_ notes: [MemoryItem], limit: NoteResultLimit) throws -> ToolResult {
         let kept = notes.prefix(max(0, limit.maxNotes))
         var truncated = kept.count < notes.count
         let items = kept.map { note -> NoteItem in
@@ -128,7 +158,9 @@ public enum NoteTools {
                 text = String(text.prefix(maxCharacters))
                 truncated = true
             }
-            return NoteItem(id: note.id.uuidString, createdAt: note.createdAt, text: text)
+            return NoteItem(
+                id: note.id.uuidString, createdAt: note.createdAt,
+                kind: note.kind.rawValue, title: note.title, text: text)
         }
         return try encode(NoteList(notes: items, truncated: truncated))
     }
@@ -166,6 +198,11 @@ private struct SaveNoteArgs: Codable, SchemaProviding {
     let text: String
 }
 
+private struct EditNoteArgs: Codable, SchemaProviding {
+    let id: String
+    let text: String
+}
+
 private struct ListNotesArgs: Codable, SchemaProviding {
     static var jsonSchema: JSONSchema { .object(properties: [:], required: []) }
 }
@@ -186,6 +223,8 @@ private struct SavedNote: Encodable {
 private struct NoteItem: Encodable {
     let id: String
     let createdAt: Date
+    let kind: String
+    let title: String?
     let text: String
 }
 

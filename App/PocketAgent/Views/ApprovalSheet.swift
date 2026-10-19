@@ -11,6 +11,7 @@ struct ApprovalSheet: View {
     static func toolLabel(_ name: String) -> String {
         switch name {
         case NoteToolName.save: "メモを保存"
+        case NoteToolName.edit: "メモを編集"
         case NoteToolName.list: "メモ一覧"
         case NoteToolName.search: "メモ検索"
         case NoteToolName.delete: "メモを削除"
