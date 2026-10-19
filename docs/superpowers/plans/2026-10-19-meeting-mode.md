@@ -150,7 +150,6 @@ extension SpeechCapture: TranscriptSource {}
     private(set) var volatileText: String
     private(set) var notes: String
     private(set) var draftNotes: String      // 更新中の途中出力（表示専用）
-    private(set) var draftNotes: String      // 更新中の途中出力（表示専用）
     private(set) var notesPhase: NotesPhase
     private(set) var startedAt: Date?
     private(set) var isForeground: Bool   // 初期値 true
