@@ -79,4 +79,22 @@ struct NoteStoreTests {
         try await store.deleteAll()
         #expect(try await store.all().isEmpty)
     }
+
+    @Test func updateReplacesTextAndKeepsCreatedAt() async throws {
+        let store = makeStore()
+        let note = try await store.add("古い")
+        let updated = try #require(try await store.update(id: note.id, text: "新しい"))
+        #expect(updated.id == note.id && updated.text == "新しい" && updated.createdAt == note.createdAt)
+        #expect(try await store.all().map(\.text) == ["新しい"])
+        #expect(try await store.update(id: UUID(), text: "x") == nil)
+    }
+
+    @Test func inMemoryStoreExposesNotesAsMemory() async throws {
+        let store = makeStore()
+        _ = try await store.add("牛乳")
+        let memory = try await store.allMemory()
+        #expect(memory.map(\.kind) == [.note] && memory.map(\.text) == ["牛乳"] && memory.first?.title == nil)
+        #expect(try await store.searchMemory("牛乳").count == 1)
+        #expect(try await store.searchMemory("なし").isEmpty)
+    }
 }

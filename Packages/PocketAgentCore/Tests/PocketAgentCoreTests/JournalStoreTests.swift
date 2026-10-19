@@ -123,4 +123,36 @@ struct JournalStoreTests {
         #expect(try await notes.delete(id: note.id))
         #expect(try await journal.all().isEmpty)
     }
+
+    @Test func updateKeepsEverythingButBody() async throws {
+        let store = makeStore()
+        let added = try await store.add(NewJournalEntry(source: .voice, origin: .journal, body: "b", transcript: "t", title: "ti"))
+        let updated = try #require(try await store.update(id: added.id, body: "b2"))
+        #expect(updated == JournalEntry(id: added.id, createdAt: added.createdAt, source: .voice, origin: .journal, body: "b2", transcript: "t", title: "ti"))
+        #expect(try await store.entry(id: added.id) == updated)
+        #expect(try await store.update(id: UUID(), body: "x") == nil)
+    }
+
+    @Test func noteProjectionUpdatesOnlyNoteToolEntries() async throws {
+        let journal = makeStore()
+        let diary = try await journal.add(new("日誌", origin: .journal))
+        let notes = JournalNoteStore(journal: journal)
+        let note = try await notes.add("メモ")
+        #expect(try await notes.update(id: diary.id, text: "改ざん") == nil)
+        #expect(try await journal.entry(id: diary.id)?.body == "日誌")
+        #expect(try await notes.update(id: note.id, text: "メモ2")?.text == "メモ2")
+    }
+
+    @Test func noteProjectionMemoryIncludesJournalWithKindAndTitle() async throws {
+        let journal = makeStore()
+        _ = try await journal.add(new("朝の散歩", title: "散歩", origin: .journal))
+        let notes = JournalNoteStore(journal: journal)
+        _ = try await notes.add("牛乳")
+        let memory = try await notes.allMemory()
+        #expect(memory.map(\.kind) == [.note, .journal])
+        #expect(memory.map(\.text) == ["牛乳", "朝の散歩"])
+        #expect(memory.map(\.title) == [nil, "散歩"])
+        #expect(try await notes.searchMemory("散歩").map(\.kind) == [.journal])
+        #expect(try await notes.all().map(\.text) == ["牛乳"])
+    }
 }

@@ -164,4 +164,13 @@ struct JournalPersistenceTests {
         try await notes.deleteAll()
         #expect(try await journal.all().map(\.id) == [diary.id])
     }
+
+    @Test func updateChangesBodyOnly() async throws {
+        let store = SwiftDataJournalStore(modelContainer: container)
+        let a = try await store.add(NewJournalEntry(source: .voice, origin: .journal, body: "朝", transcript: "あさ", title: "散歩"))
+        let updated = try #require(try await store.update(id: a.id, body: "夜"))
+        #expect(updated == JournalEntry(id: a.id, createdAt: a.createdAt, source: .voice, origin: .journal, body: "夜", transcript: "あさ", title: "散歩"))
+        #expect(try await store.entry(id: a.id) == updated)
+        #expect(try await store.update(id: UUID(), body: "x") == nil)
+    }
 }

@@ -291,5 +291,6 @@ private struct FailingStore: NoteStore {
     func search(_: String) async throws -> [Note] { throw Failure() }
     func note(id _: UUID) async throws -> Note? { throw Failure() }
     func delete(id _: UUID) async throws -> Bool { throw Failure() }
+    func update(id _: UUID, text _: String) async throws -> Note? { throw Failure() }
     func deleteAll() async throws { throw Failure() }
 }

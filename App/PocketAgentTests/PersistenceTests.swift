@@ -105,4 +105,13 @@ struct PersistenceTests {
         #expect(try githubToken.readAPIKey() == nil)
         #expect(try credentials.readAPIKey() == nil)
     }
+
+    @Test func noteUpdateReplacesText() async throws {
+        let store = SwiftDataNoteStore(modelContainer: container)
+        let a = try await store.add("旧")
+        let updated = try #require(try await store.update(id: a.id, text: "新"))
+        #expect(updated.id == a.id && updated.text == "新" && updated.createdAt == a.createdAt)
+        #expect(try await store.all().map(\.text) == ["新"])
+        #expect(try await store.update(id: UUID(), text: "x") == nil)
+    }
 }
