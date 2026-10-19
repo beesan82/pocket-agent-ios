@@ -109,7 +109,7 @@ struct SettingsView: View {
         }
         .navigationTitle("設定")
         .confirmationDialog(
-            "会話・日誌・APIキー・GitHub トークンをすべて削除します", isPresented: $confirmErase, titleVisibility: .visible
+            "会話・日誌・測定ログ・APIキー・GitHub トークンをすべて削除します", isPresented: $confirmErase, titleVisibility: .visible
         ) {
             Button("全データ削除", role: .destructive) { Task { await eraseAll() } }
             Button("キャンセル", role: .cancel) {}
@@ -175,6 +175,7 @@ struct SettingsView: View {
     }
 
     private func eraseAll() async {
+        measurementLog.clear()
         do {
             try await DataReset.eraseAll(
                 context: modelContext,

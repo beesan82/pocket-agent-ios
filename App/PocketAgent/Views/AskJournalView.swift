@@ -86,6 +86,7 @@ struct AskJournalView: View {
             }
         }
         .onAppear { mlxStore.refresh() }
+        .stopsJournalGeneration(runtime: mlxRuntime) { stop() }
         .onDisappear { stop() }
     }
 
@@ -126,7 +127,7 @@ struct AskJournalView: View {
             preparing = false
             prepareTask = nil
             guard let client else { return }
-            session.assistant = JournalAssistant(client: client)
+            session.assistant = JournalModelAccess.assistant(client: client)
             session.ask(text)
         }
     }

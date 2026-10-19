@@ -35,9 +35,10 @@ final class MeasurementLog {
         save()
     }
 
+    /// Also removes the file, so nothing of the log stays on disk.
     func clear() {
         entries = []
-        save()
+        try? FileManager.default.removeItem(at: fileURL)
     }
 
     func render(
@@ -71,6 +72,12 @@ final class MeasurementLog {
         try? FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+        // The log can hold what was said in voice tests: keep it out of backups. Set after every
+        // write because an atomic write replaces the file.
+        var url = fileURL
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
     }
 
     private static func load(from url: URL) -> [Entry] {

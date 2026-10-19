@@ -21,6 +21,12 @@ struct JournalCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var session: JournalCaptureSession?
     @State private var manualTask: Task<Void, Never>?
+    @State private var confirmDiscard = false
+
+    /// Text that would be lost on close; the sheet only closes after asking.
+    private var hasUnsavedText: Bool {
+        !(session?.transcript ?? request.transcript).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -37,11 +43,20 @@ struct JournalCaptureView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { dismiss() }
+                    Button("キャンセル") {
+                        if hasUnsavedText { confirmDiscard = true } else { dismiss() }
+                    }
                 }
             }
+            .confirmationDialog(
+                "この記録を破棄しますか？（保存されません）", isPresented: $confirmDiscard, titleVisibility: .visible
+            ) {
+                Button("破棄", role: .destructive) { dismiss() }
+                Button("戻る", role: .cancel) {}
+            }
         }
-        .interactiveDismissDisabled(session?.phase == .saving)
+        .interactiveDismissDisabled(session?.phase == .saving || hasUnsavedText)
+        .stopsJournalGeneration(runtime: mlxRuntime) { stopGeneration() }
         .task { await start() }
         .onChange(of: session?.phase) { _, phase in
             if phase == .saved {
@@ -49,11 +64,14 @@ struct JournalCaptureView: View {
                 dismiss()
             }
         }
-        .onDisappear {
-            manualTask?.cancel()
-            manualTask = nil
-            session?.stopSummary()
-        }
+        .onDisappear { stopGeneration() }
+    }
+
+    /// Ends a model load started by 「要約する」 and a running summary; the texts stay.
+    private func stopGeneration() {
+        manualTask?.cancel()
+        manualTask = nil
+        session?.stopSummary()
     }
 
     /// 「要約する」: loads the downloaded model if needed, then summarizes without the length threshold.
@@ -65,7 +83,7 @@ struct JournalCaptureView: View {
             guard !Task.isCancelled else { return }
             manualTask = nil
             guard let client else { return }
-            session.assistant = JournalAssistant(client: client)
+            session.assistant = JournalModelAccess.assistant(client: client)
             session.modelReady = true
             session.summarize()
         }
@@ -76,7 +94,7 @@ struct JournalCaptureView: View {
         let client = mlxRuntime.client
         let created = JournalCaptureSession(
             source: request.source, store: journal,
-            assistant: client.map { JournalAssistant(client: $0) }, modelReady: client != nil)
+            assistant: client.map { JournalModelAccess.assistant(client: $0) }, modelReady: client != nil)
         created.transcript = request.transcript
         session = created
         if client != nil {
@@ -89,7 +107,7 @@ struct JournalCaptureView: View {
         guard let loaded = await JournalModelAccess.client(store: mlxStore, runtime: mlxRuntime),
               !Task.isCancelled, created.phase == .editing
         else { return }
-        created.assistant = JournalAssistant(client: loaded)
+        created.assistant = JournalModelAccess.assistant(client: loaded)
         created.modelReady = true
         created.beginIfNeeded()
     }
