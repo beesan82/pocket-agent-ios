@@ -53,9 +53,13 @@ struct MLXValidationView: View {
     @State private var summaryTask: Task<Void, Never>?
     @State private var summaryRun = 0
     @State private var result: SummaryResult?
+    @State private var results: [String: SummaryResult] = [:]
+    @State private var loadBeforeMB: Int?
+    @State private var loadAfterMB: Int?
     @State private var summaryMessage: String?
     @State private var speechTask: Task<Void, Never>?
     @State private var speechMessage: String?
+    @State private var speechChars: Int?
     @State private var copied = false
     @State private var confirmClear = false
     @State private var confirmUpload = false
@@ -66,6 +70,7 @@ struct MLXValidationView: View {
 
     var body: some View {
         Form {
+            snapshotSection
             logSection
             modelSection
             memorySection
@@ -90,6 +95,44 @@ struct MLXValidationView: View {
             speechTask?.cancel()
             speechTask = nil
             Task { await speech.stop() }
+        }
+    }
+
+    // MARK: Snapshot
+
+    private static func megabytes(_ bytes: Int64?) -> Int? {
+        bytes.map { Int((Double($0) / 1_048_576).rounded()) }
+    }
+
+    private var snapshot: MeasurementSummary {
+        let status = store.status(of: store.selected)
+        let samples = Self.samples.map { sample -> MeasurementSummary.Sample in
+            let measured = results[sample.id]
+            return MeasurementSummary.Sample(
+                label: sample.label, chars: sample.text.count, seconds: measured?.seconds,
+                tokensPerSecond: measured?.tokensPerSecond, title: measured?.output.title)
+        }
+        return MeasurementSummary(
+            device: DeviceInfo.summary, appVersion: DeviceInfo.appVersion,
+            modelName: store.selected.displayName,
+            modelStatus: Self.statusText(status) + " / " + Self.stateText(runtime.state),
+            loadSeconds: runtime.lastLoadSeconds, memoryBeforeMB: loadBeforeMB, memoryAfterMB: loadAfterMB,
+            availableMB: Self.megabytes(memory.available), samples: samples,
+            speechStatus: speech.reason?.userMessage ?? "利用可能", speechChars: speechChars)
+    }
+
+    private var snapshotSection: some View {
+        Section {
+            ForEach(Array(snapshot.lines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.system(.footnote, design: .monospaced))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        } header: {
+            Text("測定サマリー（スクリーンショット用）")
+        } footer: {
+            Text("この画面をスクリーンショットし、TestFlight の『ベータ版のフィードバックを共有』で送ってください")
         }
     }
 
@@ -232,10 +275,13 @@ struct MLXValidationView: View {
 
     private func loadModel(_ model: MLXModelInfo) async {
         refreshMemory()
+        loadBeforeMB = Self.megabytes(memory.active)
+        loadAfterMB = nil
         logMemory("読み込み前")
         measurementLog.append("モデル読み込み開始: \(model.displayName)")
         await runtime.load(model)
         refreshMemory()
+        loadAfterMB = Self.megabytes(memory.active)
         if runtime.state == .loaded {
             let seconds = runtime.lastLoadSeconds.map { String(format: "%.1f", $0) } ?? "不明"
             measurementLog.append("モデル読み込み完了: \(model.displayName) \(seconds) 秒")
@@ -341,6 +387,7 @@ struct MLXValidationView: View {
         runningSampleID = sample.id
         summaryMessage = nil
         result = nil
+        results[sample.id] = nil
         let context = RequestContext(extraFields: [
             "max_tokens": .int(512),
             "temperature": .double(0.7),
@@ -370,6 +417,7 @@ struct MLXValidationView: View {
                 let output = SummaryParser.parse(message.content)
                 result = SummaryResult(
                     sampleID: sample.id, output: output, seconds: elapsed, tokensPerSecond: rate)
+                results[sample.id] = result
                 let tokenText = tokens.map { "\($0)" } ?? "不明"
                 let rateText = rate.map { String(format: "%.1f", $0) } ?? "不明"
                 measurementLog.append(
@@ -477,6 +525,7 @@ struct MLXValidationView: View {
     }
 
     private func logSpeechResult() {
+        speechChars = speech.finalText.count
         measurementLog.append("音声30秒テスト結果: 確定テキスト \(speech.finalText.count) 字")
         measurementLog.append("  > \(speech.finalText)")
     }
