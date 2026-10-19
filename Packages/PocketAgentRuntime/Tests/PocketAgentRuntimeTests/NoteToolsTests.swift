@@ -7,6 +7,8 @@ import Testing
 private struct NoteJSON: Decodable {
     let id: String
     let createdAt: String
+    let kind: String
+    let title: String?
     let text: String
 }
 
@@ -26,9 +28,9 @@ private func run(_ name: String, _ arguments: String, in tools: [RegisteredTool<
 struct NoteToolsTests {
     @Test func toolShape() throws {
         let tools = NoteTools.make(store: InMemoryNoteStore(), limit: .claude)
-        #expect(tools.map(\.tool.name) == ["save_note", "list_notes", "search_notes", "delete_note"])
-        #expect(tools.map(\.risk) == [.appInternalWrite, .readOnly, .readOnly, .appInternalDelete])
-        #expect(tools.map(\.tool.isReadOnly) == [false, true, true, false])
+        #expect(tools.map(\.tool.name) == ["save_note", "edit_note", "list_notes", "search_notes", "delete_note"])
+        #expect(tools.map(\.risk) == [.appInternalWrite, .appInternalWrite, .readOnly, .readOnly, .appInternalDelete])
+        #expect(tools.map(\.tool.isReadOnly) == [false, false, true, true, false])
         #expect(tools.allSatisfy { !$0.tool.description.isEmpty })
     }
 
@@ -119,6 +121,74 @@ struct NoteToolsTests {
         }
 
         #expect(try await store.all() == [existing])
+    }
+
+    @Test func editRequiresApprovalAndUpdates() async throws {
+        let store = InMemoryNoteStore()
+        let note = try await store.add("古い")
+        let asked = Log<PendingApproval>()
+        let client = ScriptedLLMClient([
+            .callTool(name: "edit_note", arguments: #"{"id":"\#(note.id.uuidString)","text":" 新しい "}"#),
+            .finish("直しました")
+        ])
+        let runner = AgentRunner(client: client, tools: NoteTools.make(store: store, limit: .claude))
+
+        let outcome = try await runner.run("直して", context: EmptyContext()) { request in
+            await asked.append(request)
+            return .approveOnce
+        }
+
+        #expect(outcome == .completed("直しました"))
+        #expect(await asked.entries.map(\.toolName) == ["edit_note"])
+        #expect(try await store.all().map(\.text) == ["新しい"])
+    }
+
+    @Test func editRejectsBadArgumentsAndUnknownIds() async throws {
+        let store = InMemoryNoteStore()
+        let existing = try await store.add("既存")
+        let tools = NoteTools.make(store: store, limit: .claude)
+        let tooLong = String(repeating: "あ", count: NoteTools.maxNoteLength + 1)
+        let id = existing.id.uuidString
+
+        let cases = [
+            "{}", "{broken", #"{"id":"\#(id)","text":"   "}"#, #"{"id":"\#(id)","text":"\#(tooLong)"}"#,
+            #"{"id":"not-a-uuid","text":"x"}"#, #"{"id":"\#(id)"}"#
+        ]
+        for arguments in cases {
+            let result = try await run("edit_note", arguments, in: tools)
+            #expect(result.isError, "\(arguments.prefix(30))")
+        }
+        let unknown = try await run("edit_note", #"{"id":"\#(UUID().uuidString)","text":"x"}"#, in: tools)
+        #expect(unknown == .error("該当するメモがありません"))
+        #expect(try await store.all() == [existing])
+    }
+
+    @Test func editAndDeleteRefuseJournalEntries() async throws {
+        let journal = InMemoryJournalStore()
+        let diary = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "日誌"))
+        let tools = NoteTools.make(store: JournalNoteStore(journal: journal), limit: .claude)
+        for name in ["edit_note", "delete_note"] {
+            let result = try await run(name, #"{"id":"\#(diary.id.uuidString)","text":"x"}"#, in: tools)
+            #expect(result.isError && result.content.contains("日誌タブ"), "\(name)")
+        }
+        #expect(try await journal.entry(id: diary.id)?.body == "日誌")
+    }
+
+    @Test func listAndSearchIncludeJournalWithKind() async throws {
+        let journal = InMemoryJournalStore()
+        _ = try await journal.add(NewJournalEntry(source: .voice, origin: .journal, body: "朝の散歩", title: "散歩"))
+        let store = JournalNoteStore(journal: journal)
+        _ = try await store.add("牛乳")
+        let tools = NoteTools.make(store: store, limit: .claude)
+
+        let list = try JSONDecoder().decode(
+            NoteListJSON.self, from: Data(try await run("list_notes", "{}", in: tools).content.utf8))
+        #expect(Set(list.notes.map(\.kind)) == ["note", "journal"])
+        #expect(list.notes.first { $0.kind == "journal" }?.title == "散歩")
+        #expect(list.notes.first { $0.kind == "note" }?.title == nil)
+        let found = try JSONDecoder().decode(
+            NoteListJSON.self, from: Data(try await run("search_notes", #"{"query":"散歩"}"#, in: tools).content.utf8))
+        #expect(found.notes.map(\.kind) == ["journal"])
     }
 
     @Test func listRespectsLimit() async throws {
@@ -271,6 +341,7 @@ struct NoteToolsTests {
         let tools = NoteTools.make(store: FailingStore(), limit: .claude)
         let calls = [
             ("save_note", #"{"text":"a"}"#),
+            ("edit_note", #"{"id":"\#(UUID().uuidString)","text":"a"}"#),
             ("list_notes", "{}"),
             ("search_notes", #"{"query":"a"}"#),
             ("delete_note", #"{"id":"\#(UUID().uuidString)"}"#)
@@ -283,7 +354,7 @@ struct NoteToolsTests {
     }
 }
 
-private struct FailingStore: NoteStore {
+private struct FailingStore: MemoryStore {
     struct Failure: Error, CustomStringConvertible { let description = "SECRET-DETAIL" }
 
     func add(_: String) async throws -> Note { throw Failure() }
@@ -293,4 +364,6 @@ private struct FailingStore: NoteStore {
     func delete(id _: UUID) async throws -> Bool { throw Failure() }
     func update(id _: UUID, text _: String) async throws -> Note? { throw Failure() }
     func deleteAll() async throws { throw Failure() }
+    func allMemory() async throws -> [MemoryItem] { throw Failure() }
+    func searchMemory(_: String) async throws -> [MemoryItem] { throw Failure() }
 }

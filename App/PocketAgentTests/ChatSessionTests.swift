@@ -321,6 +321,13 @@ struct ChatSessionTests {
             == "該当するメモがありません")
         #expect(await ChatSession.summary(
             for: request(NoteToolName.delete, Self.json(["id": "x"])), notes: notes) == "該当するメモがありません")
+        #expect(await ChatSession.summary(
+            for: request(NoteToolName.edit, Self.json(["id": note.id.uuidString, "text": "新しい本文"])), notes: notes)
+            == "買い物リスト → 新しい本文")
+        #expect(await ChatSession.summary(
+            for: request(NoteToolName.edit, Self.json(["id": UUID().uuidString, "text": "x"])), notes: notes)
+            == "該当するメモがありません")
+        #expect(await ChatSession.summary(for: request(NoteToolName.edit, "not json"), notes: notes) == "not json")
         #expect(await ChatSession.summary(for: request("other_tool", "{\"a\":1}"), notes: notes) == "{\"a\":1}")
     }
 
