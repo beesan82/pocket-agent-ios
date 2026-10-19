@@ -24,3 +24,7 @@ build/
 Thumbs.db
 .vscode/
 xcuserdata/
+
+# TestFlight feedback pulled by tools/asc_feedback.py (screenshots may contain personal text)
+.feedback/
+__pycache__/
