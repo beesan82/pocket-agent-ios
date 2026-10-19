@@ -156,8 +156,7 @@ struct JournalCaptureSessionTests {
 
     @Test func stopSummaryCancelsTheStream() async throws {
         let probe = StreamProbe()
-        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 途中
-本文の途中"], probe: probe)
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 途中\n本文の途中"], probe: probe)
         let session = JournalCaptureSession(
             source: .voice, store: InMemoryJournalStore(), assistant: assistant, modelReady: true)
         session.transcript = Self.longText
@@ -175,8 +174,7 @@ struct JournalCaptureSessionTests {
     }
 
     @Test func manualSummaryIgnoresThreshold() async throws {
-        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 散歩
-散歩した。"])
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 散歩\n散歩した。"])
         let session = JournalCaptureSession(
             source: .text, store: InMemoryJournalStore(), assistant: assistant, modelReady: true)
         session.transcript = "朝に散歩した"
