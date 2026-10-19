@@ -150,6 +150,7 @@ extension SpeechCapture: TranscriptSource {}
     private(set) var volatileText: String
     private(set) var notes: String
     private(set) var draftNotes: String      // 更新中の途中出力（表示専用）
+    private(set) var draftNotes: String      // 更新中の途中出力（表示専用）
     private(set) var notesPhase: NotesPhase
     private(set) var startedAt: Date?
     private(set) var isForeground: Bool   // 初期値 true
@@ -196,7 +197,7 @@ extension SpeechCapture: TranscriptSource {}
 ### Task 5: App — 会議タブ、配線、中断処理、Docs
 **Files:**
 - Create: `App/PocketAgent/Views/MeetingView.swift`
-- Modify: `App/PocketAgent/Views/RootTabView.swift`（タブ「会議」を「聞く」と「チャット」の間に追加、`systemImage: "waveform"`）, `App/PocketAgent/Views/ContentView.swift`（`@Environment(\.scenePhase)` → `meeting.setForeground(phase == .active)`）, `App/PocketAgent/PocketAgentApp.swift`（`@State private var meeting: MeetingSession` を `SpeechCapture()` + journal で 1 つ生成。journal が nil のときは生成しない）, `App/PocketAgent/Speech/SpeechCapture.swift`（`AVAudioSession.interruptionNotification` を購読し、`.began` でパイプラインをキャンセルして `.failed(MeetingSession.pausedText)` ではなく **`SpeechCapture.interruptedText = "録音が中断されました。再開してください。"`** を yield して finish。`.ended` の自動再開は初版ではしない）
+- Modify: `App/PocketAgent/Views/RootTabView.swift`（タブ「会議」を「聞く」と「チャット」の間に追加、`systemImage: "waveform"`）, `App/PocketAgent/Views/ContentView.swift`（`@Environment(\.scenePhase)` → `meeting.setForeground(phase == .active)`）, `App/PocketAgent/PocketAgentApp.swift`（`@State private var meeting: MeetingSession` を `SpeechCapture()` + journal で 1 つ生成。journal が nil のときは生成しない）, `App/PocketAgent/Speech/SpeechCapture.swift`（`AVAudioSession.interruptionNotification` を購読し、`.began` でパイプラインをキャンセルして **`SpeechCapture.interruptedText = "録音が中断されました。再開してください。"`**（`MeetingSession.pausedText` と同じ値）を `.failed` で yield して finish。`.ended` の自動再開は初版ではしない）
 - Modify docs: `docs/phase0-checklist.md`（Phase 2 節に「会議モード 実機未検証: ロック中の継続・電話割り込み・1 時間連続・要点品質・録音中のモデル読み込み」）, `docs/test-plan.md`（会議モードの手動確認項目）, `docs/decisions.md`（ADR-026 会議の要点は差分更新・前面のみ、ADR-027 バックグラウンド audio を使う）, `docs/architecture.md`（会議タブと MeetingSession の 1 行）
 - Test: なし（画面はビルドのみ）。`MeetingSessionTests` が中断文言を使うなら `MeetingSession.pausedText` を `SpeechCapture.interruptedText` と同じ値にする。
 
