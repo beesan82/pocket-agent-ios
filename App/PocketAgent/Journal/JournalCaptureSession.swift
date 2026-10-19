@@ -44,7 +44,8 @@ final class JournalCaptureSession {
     }
 
     /// Starts the summary when the text is long enough and the model is ready (once per capture).
-    func beginIfNeeded() {
+    func beginIfNeeded(isForeground: Bool = true) {
+        _ = isForeground  // RED stub: the gate is not implemented yet
         guard phase == .editing, !hasSummary, summaryTask == nil, assistant != nil else { return }
         let input = trimmedTranscript
         guard SummaryPolicy.shouldSummarize(text: input, modelReady: modelReady) else { return }

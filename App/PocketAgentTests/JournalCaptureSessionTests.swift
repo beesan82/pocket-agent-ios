@@ -77,6 +77,34 @@ struct JournalCaptureSessionTests {
         #expect(session.summaryBody.isEmpty)
     }
 
+    @Test func backgroundBlocksAutoSummary() async throws {
+        let store = InMemoryJournalStore()
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 来月
+会議で来月の計画を話した。"])
+        let session = JournalCaptureSession(source: .voice, store: store, assistant: assistant, modelReady: true)
+        session.transcript = Self.longText
+
+        session.beginIfNeeded(isForeground: false)
+
+        #expect(session.phase == .editing)
+        #expect(session.summaryTask == nil)
+        #expect(session.transcript == Self.longText)
+    }
+
+    @Test func foregroundStillAutoSummarizes() async throws {
+        let store = InMemoryJournalStore()
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 来月
+会議で来月の計画を話した。"])
+        let session = JournalCaptureSession(source: .voice, store: store, assistant: assistant, modelReady: true)
+        session.transcript = Self.longText
+
+        session.beginIfNeeded(isForeground: true)
+        #expect(session.phase == .summarizing)
+        await session.summaryTask?.value
+
+        #expect(session.phase == .summarized)
+    }
+
     @Test func longTextWithModelSummarizes() async throws {
         let store = InMemoryJournalStore()
         let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 来月", "の計画\n会議で", "来月の計画を話した。"])
