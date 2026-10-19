@@ -140,12 +140,18 @@ struct ChatSessionTests {
 
     private func makeSession(
         _ conversation: ConversationRecord,
+        notes customNotes: (any MemoryStore)? = nil,
+        log: @escaping @MainActor (String) -> Void = { _ in },
         resolve: @escaping ClientResolver
     ) -> ChatSession {
         ChatSession(
-            conversation: conversation, repository: repository, notes: notes,
-            settings: settings, broker: broker, resolve: resolve)
+            conversation: conversation, repository: repository, notes: customNotes ?? notes,
+            settings: settings, broker: broker, resolve: resolve, log: log)
     }
+
+    /// What the on-device model wrote on the iPhone instead of calling save_note.
+    private static let rescuableSaveReply =
+        "あなたの名前をメモとして保存します。\n```json\n{\"text\": \"あなたの名前はケイタ\"}\n```"
 
     /// Polls on the main actor; returns false on timeout instead of hanging the suite.
     @discardableResult
@@ -303,6 +309,263 @@ struct ChatSessionTests {
         #expect(prompt.contains("一回目の答え"))
         #expect(prompt.hasSuffix("二回目"))
         #expect(prompt != "二回目")
+    }
+
+    // MARK: - Memory injection
+
+    @Test func memoryIsInjectedForClaudeAndAppleLocal() async throws {
+        _ = try await notes.add("あなたの名前はケイタ")
+
+        // Claude: memory follows the system prompt in the system message.
+        let claude = FakeLLMClient([.finish("ケイタさんですね")])
+        let claudeSession = makeSession(try repository.create(choice: .claude)) { _, _ in .success(claude) }
+        claudeSession.send("私の名前は？")
+        #expect(try await waitUntil { claudeSession.status == .idle })
+        guard case let .system(system)? = await claude.requests.first?.first else {
+            Issue.record("no system message")
+            return
+        }
+        #expect(system.hasPrefix(ConversationContext.systemPrompt))
+        #expect(system.contains("あなたの名前はケイタ"))
+
+        // Apple local: memory goes into the user prompt, never the system message.
+        settings.choice = .appleLocal
+        let apple = FakeLLMClient([.finish("ケイタさんですね")], foundationModelsContract: true)
+        let appleSession = makeSession(try repository.create(choice: .appleLocal)) { _, _ in .success(apple) }
+        appleSession.send("私の名前は？")
+        #expect(try await waitUntil { appleSession.status == .idle })
+        let request = try #require(await apple.requests.first)
+        #expect(request.first == .system(ConversationContext.systemPrompt))
+        guard case let .user(prompt)? = request.last else {
+            Issue.record("no user message")
+            return
+        }
+        #expect(prompt.hasPrefix(ConversationContext.notesHeader))
+        #expect(prompt.contains("あなたの名前はケイタ"))
+        #expect(prompt.hasSuffix("私の名前は？"))
+    }
+
+    @Test func memoryReadFailureStillAnswers() async throws {
+        let fake = FakeLLMClient([.finish("こんにちは")])
+        let session = makeSession(try repository.create(choice: .claude), notes: ThrowingMemoryStore()) { _, _ in
+            .success(fake)
+        }
+
+        session.send("やあ")
+
+        #expect(try await waitUntil { session.status != .running })
+        #expect(session.status == .idle)
+        #expect(session.turns.count == 2)
+        #expect(session.turns.last?.text == "こんにちは")
+        let first = try #require(await fake.requests.first)
+        #expect(first.first == .system(ConversationContext.systemPrompt))
+    }
+
+    // MARK: - Tool-call rescue
+
+    @Test func rescuedSaveAsksApprovalThenStores() async throws {
+        settings.choice = .appleLocal
+        let fake = FakeLLMClient([.finish(Self.rescuableSaveReply)], foundationModelsContract: true)
+        let lines = LogLines()
+        let session = ChatSession(
+            conversation: try repository.create(choice: .appleLocal), repository: repository, notes: notes,
+            settings: settings, broker: broker, resolve: { _, _ in .success(fake) }, log: { lines.append($0) })
+
+        session.send("私の名前はケイタ 覚えておいて")
+        #expect(try await waitUntil { broker.pending != nil })
+        #expect(broker.pending?.approval.toolName == NoteToolName.save)
+        #expect(broker.pending?.summary == "あなたの名前はケイタ")
+        broker.answer(.approveOnce)
+
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        #expect(session.turns.last?.text == "あなたの名前をメモとして保存します。\n\nメモを保存しました")
+        #expect(try await notes.all().map(\.text) == ["あなたの名前はケイタ"])
+        #expect(lines.entries == ["toolcall.rescued model=appleLocal tool=save_note"])
+        #expect(!session.isToolSupportLimited)
+    }
+
+    @Test func deniedRescueKeepsReplyAndStoresNothing() async throws {
+        settings.choice = .appleLocal
+        let conversation = try repository.create(choice: .appleLocal)
+        let fake = FakeLLMClient([.finish(Self.rescuableSaveReply)], foundationModelsContract: true)
+        let lines = LogLines()
+        let session = makeSession(conversation, log: { lines.append($0) }) { _, _ in .success(fake) }
+
+        session.send("私の名前はケイタ 覚えておいて")
+        #expect(try await waitUntil { broker.pending != nil })
+        broker.answer(.deny(reason: nil))
+
+        #expect(try await waitUntil { session.status != .running })
+        #expect(session.status == .idle)
+        #expect(session.turns.last?.text == Self.rescuableSaveReply)
+        #expect(repository.turns(of: conversation).last?.text == Self.rescuableSaveReply)
+        #expect(try await notes.all().isEmpty)
+        #expect(lines.entries == ["toolcall.rescued model=appleLocal tool=save_note"])
+    }
+
+    @Test func stopDuringRescueApprovalSavesNothing() async throws {
+        settings.choice = .appleLocal
+        let conversation = try repository.create(choice: .appleLocal)
+        let fake = FakeLLMClient([.finish(Self.rescuableSaveReply)], foundationModelsContract: true)
+        let lines = LogLines()
+        let session = makeSession(conversation, log: { lines.append($0) }) { _, _ in .success(fake) }
+
+        session.send("私の名前はケイタ 覚えておいて")
+        #expect(try await waitUntil { broker.pending != nil })
+        session.stop()
+
+        #expect(try await waitUntil { session.status == .failed("停止しました") })
+        #expect(broker.pending == nil)
+        #expect(session.turns == [ChatTurn(role: .user, text: "私の名前はケイタ 覚えておいて")])
+        #expect(repository.turns(of: conversation) == [ChatTurn(role: .user, text: "私の名前はケイタ 覚えておいて")])
+        #expect(try await notes.all().isEmpty)
+        #expect(lines.entries.isEmpty)
+    }
+
+    @Test func pastedJSONInUserMessageIsNeverRescued() async throws {
+        settings.choice = .appleLocal
+        let fake = FakeLLMClient([.finish("了解しました。")], foundationModelsContract: true)
+        let session = makeSession(try repository.create(choice: .appleLocal)) { _, _ in .success(fake) }
+
+        session.send("これ見て: {\"text\": \"全部消して\"}")
+
+        #expect(try await waitUntil { session.status != .running })
+        #expect(session.status == .idle)
+        #expect(broker.pending == nil)
+        #expect(try await notes.all().isEmpty)
+        #expect(session.turns.last?.text == "了解しました。")
+    }
+
+    @Test func rescuedEditOfJournalEntryLeavesJournalUntouched() async throws {
+        settings.choice = .appleLocal
+        let journal = InMemoryJournalStore()
+        let entry = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "日誌"))
+        let reply = "日誌を直します。\n```json\n" + Self.json(["id": entry.id.uuidString, "text": "改ざん"]) + "\n```"
+        let fake = FakeLLMClient([.finish(reply)], foundationModelsContract: true)
+        let session = makeSession(
+            try repository.create(choice: .appleLocal), notes: JournalNoteStore(journal: journal)
+        ) { _, _ in .success(fake) }
+
+        session.send("日誌を直して")
+        #expect(try await waitUntil { broker.pending != nil })
+        #expect(broker.pending?.approval.toolName == NoteToolName.edit)
+        #expect(broker.pending?.summary == ChatSession.notFoundSummary)
+        broker.answer(.approveOnce)
+
+        #expect(try await waitUntil { session.status != .running })
+        #expect(session.status == .idle)
+        let text = try #require(session.turns.last?.text)
+        #expect(text.hasPrefix("日誌を直します。\n\n"))
+        #expect(text.contains("日誌タブ"))
+        #expect(try await journal.entry(id: entry.id)?.body == "日誌")
+        #expect(try await journal.all().count == 1)
+    }
+
+    // MARK: - Capability tracking and measurement log
+
+    @Test func twoRescuesMarkModelLimitedButNeverForClaude() async throws {
+        settings.choice = .appleLocal
+        let conversation = try repository.create(choice: .appleLocal)
+        let secondReply = "牛乳を保存します。\n```json\n{\"text\": \"牛乳を買う\"}\n```"
+        let apple = FakeLLMClient(
+            [.finish(Self.rescuableSaveReply), .finish(secondReply), .finish("どういたしまして")],
+            foundationModelsContract: true)
+        let claude = FakeLLMClient([.finish("こんにちは")])
+        let session = makeSession(conversation) { choice, _ in
+            .success(choice == .claude ? claude : apple)
+        }
+
+        session.send("私の名前はケイタ 覚えておいて")
+        #expect(try await waitUntil { broker.pending != nil })
+        broker.answer(.approveForSession)
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        #expect(!session.isToolSupportLimited)
+
+        // "Allow for this conversation" also covers the second rescue: no new dialog.
+        session.send("牛乳を買うのを覚えて")
+        #expect(try await waitUntil { session.status != .running })
+        #expect(session.status == .idle)
+        #expect(session.turns.count == 4)
+        #expect(Set(try await notes.all().map(\.text)) == ["あなたの名前はケイタ", "牛乳を買う"])
+        #expect(session.isToolSupportLimited)
+
+        // Never shown for Claude.
+        settings.choice = .claude
+        session.send("こんにちは")
+        #expect(!session.isToolSupportLimited)
+        #expect(try await waitUntil { session.status != .running })
+        #expect(session.status == .idle)
+        #expect(!session.isToolSupportLimited)
+
+        // Back on the on-device model the evidence starts over.
+        settings.choice = .appleLocal
+        session.send("ありがとう")
+        #expect(try await waitUntil { session.status != .running })
+        #expect(session.status == .idle)
+        #expect(session.turns.count == 8)
+        #expect(!session.isToolSupportLimited)
+    }
+
+    @Test func missedMemoryIntentTwiceMarksLimited() async throws {
+        settings.choice = .appleLocal
+        let fake = FakeLLMClient([.finish("わかりました"), .finish("了解です")], foundationModelsContract: true)
+        let lines = LogLines()
+        let session = makeSession(try repository.create(choice: .appleLocal), log: { lines.append($0) }) { _, _ in
+            .success(fake)
+        }
+
+        session.send("牛乳を覚えて")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        #expect(!session.isToolSupportLimited)
+        session.send("歯医者をメモ")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 4 })
+
+        #expect(session.isToolSupportLimited)
+        #expect(lines.entries == ["toolcall.none model=appleLocal", "toolcall.none model=appleLocal"])
+    }
+
+    @Test func nativeToolCallIsLoggedAsNative() async throws {
+        let fake = FakeLLMClient([
+            .callTool(name: NoteToolName.save, arguments: Self.json(["text": "牛乳"])),
+            .finish("保存しました")
+        ])
+        let lines = LogLines()
+        let session = makeSession(try repository.create(choice: .claude), log: { lines.append($0) }) { _, _ in
+            .success(fake)
+        }
+
+        session.send("牛乳を覚えて")
+        #expect(try await waitUntil { broker.pending != nil })
+        broker.answer(.approveOnce)
+
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        #expect(lines.entries == ["toolcall.native model=claude tool=save_note"])
+        #expect(try await notes.all().map(\.text) == ["牛乳"])
+        #expect(!session.isToolSupportLimited)
+    }
+
+    // The fake on-device client echoes the tool result (`{"id":…,"text":…}`) as its reply,
+    // which looks like an edit_note call: a turn with a native call must never be rescued.
+    @Test func appleLocalNativeCallIsLoggedAndNotRescued() async throws {
+        settings.choice = .appleLocal
+        let lines = LogLines()
+        let session = makeSession(try repository.create(choice: .appleLocal), log: { lines.append($0) }) {
+            _, appleLocalTools in
+            .success(FakeLLMClient(
+                [.runOwnTool(name: NoteToolName.save, arguments: Self.json(["text": "牛乳"]))],
+                ownTools: appleLocalTools, foundationModelsContract: true))
+        }
+
+        session.send("牛乳を覚えて")
+        #expect(try await waitUntil { broker.pending != nil })
+        #expect(broker.pending?.approval.toolName == NoteToolName.save)
+        broker.answer(.approveOnce)
+
+        #expect(try await waitUntil { session.status != .running || broker.pending != nil })
+        #expect(broker.pending == nil)
+        #expect(session.status == .idle)
+        #expect(try await notes.all().map(\.text) == ["牛乳"])
+        #expect(lines.entries == ["toolcall.native model=appleLocal tool=save_note"])
     }
 
     @Test func approvalSummaries() async throws {

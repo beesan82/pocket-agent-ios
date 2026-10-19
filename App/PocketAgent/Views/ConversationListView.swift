@@ -44,7 +44,8 @@ struct ConversationListView: View {
         .navigationDestination(for: ConversationRecord.self) { conversation in
             ChatView(
                 conversation: conversation, settings: settings,
-                credentials: credentials, availability: availability, journal: journal)
+                credentials: credentials, availability: availability, journal: journal,
+                measurementLog: measurementLog)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

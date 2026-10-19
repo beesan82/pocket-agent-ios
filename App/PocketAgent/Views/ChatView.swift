@@ -9,6 +9,7 @@ struct ChatView: View {
     let credentials: any CredentialStore
     let availability: any ModelAvailabilityChecking
     let journal: any JournalStore
+    let measurementLog: MeasurementLog
 
     @Environment(\.modelContext) private var modelContext
     @State private var session: ChatSession?
@@ -33,7 +34,8 @@ struct ChatView: View {
                 settings: settings,
                 broker: broker,
                 resolve: ChatSession.liveResolver(
-                    credentials: credentials, availability: availability, settings: settings))
+                    credentials: credentials, availability: availability, settings: settings),
+                log: { measurementLog.append($0) })
         }
         .onDisappear { session?.stop() }
     }
@@ -79,6 +81,9 @@ private struct ChatContent: View {
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(settings.choice.displayName).font(.caption).foregroundStyle(.secondary)
+            if session.isToolSupportLimited {
+                Text(ToolCapabilityTracker.limitedMessage).font(.caption).foregroundStyle(.orange)
+            }
             if settings.choice == .claude {
                 Text("Claude選択中: 入力・直近の会話・参照したメモはAnthropicへ送信されます")
                     .font(.caption).foregroundStyle(.orange)

@@ -32,3 +32,28 @@ struct FixedAvailability: ModelAvailabilityChecking {
     let reason: ModelUnavailableReason?
     func appleLocalUnavailableReason() -> ModelUnavailableReason? { reason }
 }
+
+/// A memory store whose every call fails, for the "memory unavailable" path.
+struct ThrowingMemoryStore: MemoryStore {
+    struct Failure: Error {}
+
+    func add(_: String) async throws -> Note { throw Failure() }
+    func all() async throws -> [Note] { throw Failure() }
+    func search(_: String) async throws -> [Note] { throw Failure() }
+    func note(id _: UUID) async throws -> Note? { throw Failure() }
+    func update(id _: UUID, text _: String) async throws -> Note? { throw Failure() }
+    func delete(id _: UUID) async throws -> Bool { throw Failure() }
+    func deleteAll() async throws { throw Failure() }
+    func allMemory() async throws -> [MemoryItem] { throw Failure() }
+    func searchMemory(_: String) async throws -> [MemoryItem] { throw Failure() }
+}
+
+/// Collects the measurement log lines a `ChatSession` writes.
+@MainActor
+final class LogLines {
+    private(set) var entries: [String] = []
+
+    func append(_ line: String) {
+        entries.append(line)
+    }
+}
