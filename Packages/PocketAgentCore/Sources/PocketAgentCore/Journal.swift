@@ -63,6 +63,8 @@ public protocol JournalStore: Sendable {
     /// The newest `limit` entries; `limit <= 0` gives `[]`.
     func recent(limit: Int) async throws -> [JournalEntry]
     func entry(id: UUID) async throws -> JournalEntry?
+    /// Replaces the body only; everything else is kept. Nil when there is no such entry.
+    func update(id: UUID, body: String) async throws -> JournalEntry?
     func delete(id: UUID) async throws -> Bool
     func deleteAll() async throws
 }
@@ -105,6 +107,16 @@ public actor InMemoryJournalStore: JournalStore {
         stored.first { $0.id == id }
     }
 
+    public func update(id: UUID, body: String) async throws -> JournalEntry? {
+        guard let index = stored.firstIndex(where: { $0.id == id }) else { return nil }
+        let old = stored[index]
+        let updated = JournalEntry(
+            id: old.id, createdAt: old.createdAt, source: old.source, origin: old.origin,
+            body: body, transcript: old.transcript, title: old.title)
+        stored[index] = updated
+        return updated
+    }
+
     public func delete(id: UUID) async throws -> Bool {
         guard let index = stored.firstIndex(where: { $0.id == id }) else { return false }
         stored.remove(at: index)
@@ -124,8 +136,9 @@ public actor InMemoryJournalStore: JournalStore {
 }
 
 /// The `NoteStore` view of a journal, used by the Claude chat's note tools.
-/// It only sees entries those tools saved (`.noteTool`), never journal entries.
-public struct JournalNoteStore: NoteStore {
+/// Its `NoteStore` methods only see entries those tools saved (`.noteTool`); its
+/// `MemoryReading` side also exposes journal entries, read-only.
+public struct JournalNoteStore: NoteStore, MemoryReading {
     private let journal: any JournalStore
 
     public init(journal: any JournalStore) {
@@ -150,6 +163,19 @@ public struct JournalNoteStore: NoteStore {
         return Self.note(from: entry)
     }
 
+    public func update(id: UUID, text: String) async throws -> Note? {
+        guard try await note(id: id) != nil else { return nil }
+        return try await journal.update(id: id, body: text).map(Self.note(from:))
+    }
+
+    public func allMemory() async throws -> [MemoryItem] {
+        try await journal.all().map(Self.item(from:))
+    }
+
+    public func searchMemory(_ query: String) async throws -> [MemoryItem] {
+        try await journal.search(query).map(Self.item(from:))
+    }
+
     public func delete(id: UUID) async throws -> Bool {
         guard try await note(id: id) != nil else { return false }
         return try await journal.delete(id: id)
@@ -162,6 +188,12 @@ public struct JournalNoteStore: NoteStore {
     }
 
     private static func isNoteTool(_ entry: JournalEntry) -> Bool { entry.origin == .noteTool }
+
+    private static func item(from entry: JournalEntry) -> MemoryItem {
+        MemoryItem(
+            id: entry.id, kind: isNoteTool(entry) ? .note : .journal, createdAt: entry.createdAt,
+            title: entry.title, text: entry.body)
+    }
 
     private static func note(from entry: JournalEntry) -> Note {
         Note(id: entry.id, text: entry.body, createdAt: entry.createdAt)

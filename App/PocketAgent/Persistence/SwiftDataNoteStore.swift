@@ -25,6 +25,13 @@ actor SwiftDataNoteStore: NoteStore {
         try fetchRecord(id: id).map(Self.note(from:))
     }
 
+    func update(id: UUID, text: String) async throws -> Note? {
+        guard let record = try fetchRecord(id: id) else { return nil }
+        record.text = text
+        try modelContext.save()
+        return Self.note(from: record)
+    }
+
     func delete(id: UUID) async throws -> Bool {
         guard let record = try fetchRecord(id: id) else { return false }
         modelContext.delete(record)

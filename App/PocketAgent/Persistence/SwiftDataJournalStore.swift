@@ -46,6 +46,13 @@ actor SwiftDataJournalStore: JournalStore {
         try fetchRecord(id: id).flatMap(Self.entry(from:))
     }
 
+    func update(id: UUID, body: String) async throws -> JournalEntry? {
+        guard let record = try fetchRecord(id: id) else { return nil }
+        record.body = body
+        try save()
+        return Self.entry(from: record)
+    }
+
     func delete(id: UUID) async throws -> Bool {
         guard let record = try fetchRecord(id: id) else { return false }
         modelContext.delete(record)
