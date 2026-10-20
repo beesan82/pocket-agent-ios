@@ -9,12 +9,15 @@ import PocketAgentRuntime
 typealias ClientResolver = @MainActor (ModelChoice, _ appleLocalTools: [any AnyTool<EmptyContext>])
     -> Result<any LLMClient, ModelResolutionError>
 
-/// One conversation on screen: runs one `AgentRunner.run` per user message and persists turns.
+/// One conversation on screen and persists its turns. Claude and the Apple model run one
+/// `AgentRunner.run` per user message; the downloaded model streams a text-only reply.
 @MainActor
 @Observable
 final class ChatSession {
     enum Status: Equatable {
         case idle
+        /// The downloaded model is being loaded before it can answer.
+        case loadingModel
         case running
         case failed(String)
     }
@@ -25,11 +28,15 @@ final class ChatSession {
 
     private(set) var turns: [ChatTurn]
     private(set) var status = Status.idle
-    /// The on-device model kept failing to use the note tools in this conversation (requirements §6.4).
-    /// Follows the current selection, so it is never true while Claude is selected.
+    /// The downloaded model's reply so far; never saved until the reply completes.
+    private(set) var streamingText = ""
+    /// A send is in progress (loading the model or answering).
+    var isBusy: Bool { status == .running || status == .loadingModel }
+    /// The Apple model kept failing to use the note tools in this conversation (requirements §6.4).
+    /// Follows the current selection, so it is only ever true while the Apple model is selected.
     var isToolSupportLimited: Bool {
         let current = settings.choice
-        return current != .claude && current == lastChoice && tracker.isLimited
+        return current == .appleLocal && current == lastChoice && tracker.isLimited
     }
 
     @ObservationIgnored private let conversation: ConversationRecord
@@ -37,6 +44,7 @@ final class ChatSession {
     @ObservationIgnored private let notes: any MemoryStore
     @ObservationIgnored private let settings: ModelSettings
     @ObservationIgnored private let resolve: ClientResolver
+    @ObservationIgnored private let localModel: any LocalModelAccess
     @ObservationIgnored private let approvalHandler: ToolApprovalGate.ApprovalHandler
     @ObservationIgnored private let log: @MainActor (String) -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -51,6 +59,7 @@ final class ChatSession {
         settings: ModelSettings,
         broker: ApprovalBroker,
         resolve: @escaping ClientResolver,
+        localModel: any LocalModelAccess,
         log: @escaping @MainActor (String) -> Void = { _ in }
     ) {
         self.conversation = conversation
@@ -58,6 +67,7 @@ final class ChatSession {
         self.notes = notes
         self.settings = settings
         self.resolve = resolve
+        self.localModel = localModel
         self.log = log
         turns = repository.turns(of: conversation)
         // "Allow for this conversation" lives in this handler's ConversationApprovals: shared by
@@ -84,7 +94,7 @@ final class ChatSession {
 
     func send(_ text: String) {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, status != .running else { return }
+        guard !message.isEmpty, !isBusy else { return }
 
         let choice = settings.choice
         // Capability evidence is per model: switching models starts over.
@@ -103,59 +113,87 @@ final class ChatSession {
         }
         turns.append(userTurn)
 
-        // Temporary until the MLX chat path lands: report instead of resolving.
-        if choice == .mlxLocal {
-            status = .failed(ModelUnavailableReason.modelNotDownloaded.userMessage)
-            return
+        // Each model has its own path: the downloaded model never reaches the resolver,
+        // the note tools or the Claude credentials.
+        switch choice {
+        case .claude:
+            sendWithAgent(.claude, message: message, previousTurns: previousTurns)
+        case .appleLocal:
+            sendWithAgent(.appleLocal, message: message, previousTurns: previousTurns)
+        case .mlxLocal:
+            sendLocal(message: message, previousTurns: previousTurns)
         }
+    }
 
-        // Tool placement follows the choice: on-device tools run inside the client's
+    func stop() {
+        task?.cancel()
+    }
+
+    /// The models that run through `AgentRunner` with the note tools.
+    private enum AgentModel: Equatable {
+        case claude
+        case appleLocal
+
+        var choice: ModelChoice {
+            switch self {
+            case .claude: .claude
+            case .appleLocal: .appleLocal
+            }
+        }
+    }
+
+    private func sendWithAgent(_ model: AgentModel, message: String, previousTurns: [ChatTurn]) {
+        // Tool placement follows the model: on-device tools run inside the client's
         // session, so they are gated there and the runner gets none. Every tool records
         // its native calls, so a native call is told apart from a missed one:
         // - Claude: AgentRunKit asks before `execute`, so only executed calls are recorded.
         // - On device: the recorder sits outside the gate, so a call the user denies still
         //   counts as native and the same reply is never rescued and asked about again.
         let handler = approvalHandler
-        let tools = NoteTools.make(store: notes, limit: choice == .claude ? .claude : .appleLocal)
+        let noteLimit: NoteResultLimit = switch model {
+        case .claude: .claude
+        case .appleLocal: .appleLocal
+        }
+        let tools = NoteTools.make(store: notes, limit: noteLimit)
         let recorder = ToolCallRecorder()
-        let appleLocalTools: [any AnyTool<EmptyContext>] = switch choice {
-        case .claude, .mlxLocal: []
+        let appleLocalTools: [any AnyTool<EmptyContext>] = switch model {
+        case .claude: []
         case .appleLocal: ToolApprovalGate.wrap(tools, approval: handler).map { gated -> any AnyTool<EmptyContext> in
                 RecordingTool(inner: gated, recorder: recorder)
             }
         }
         let client: any LLMClient
-        switch resolve(choice, appleLocalTools) {
+        switch resolve(model.choice, appleLocalTools) {
         case let .success(resolved):
             client = resolved
         case let .failure(error):
             status = .failed(RunFailureText.message(for: error))
             return
         }
-        let runnerTools: [RegisteredTool<EmptyContext>] = switch choice {
+        let runnerTools: [RegisteredTool<EmptyContext>] = switch model {
         case .claude: tools.map {
                 RegisteredTool<EmptyContext>(RecordingTool(inner: $0.tool, recorder: recorder), risk: $0.risk)
             }
-        case .appleLocal, .mlxLocal: []
+        case .appleLocal: []
         }
 
         status = .running
         task = Task {
             // Memory is optional context: a read failure must not stop the answer.
             let memory = (try? await notes.allMemory()) ?? []
-            let section = ConversationContext.memorySection(
-                memory: memory, limit: choice == .claude ? .claude : .appleLocal)
             // The on-device client accepts only system messages plus one user message
             // (AgentRunKit 6.1.0 FMMessageMapper), so earlier turns and memory go into the prompt.
             let systemPrompt: String
             let prompt: String
             let history: [ChatMessage]
-            switch choice {
+            switch model {
             case .claude:
+                let section = ConversationContext.memorySection(memory: memory, limit: .claude)
                 systemPrompt = ConversationContext.claudeSystemPrompt(memorySection: section)
                 prompt = message
                 history = ConversationContext.history(from: previousTurns, budget: .claude)
-            case .appleLocal, .mlxLocal:
+            case .appleLocal:
+                let section = ConversationContext.memorySection(memory: memory, limit: .appleLocal)
                 systemPrompt = ConversationContext.systemPrompt
                 prompt = ConversationContext.appleLocalPrompt(
                     history: previousTurns, message: message, memorySection: section)
@@ -172,17 +210,73 @@ final class ChatSession {
             }
             let nativeTool = await recorder.firstTool
             await self.finish(outcome, turn: TurnInfo(
-                choice: choice, message: message, tools: tools, nativeTool: nativeTool))
+                model: model, message: message, tools: tools, nativeTool: nativeTool))
         }
     }
 
-    func stop() {
-        task?.cancel()
+    /// The downloaded model: text only (no tools, no rescue, no tool-call metrics), streamed
+    /// into `streamingText`. A stopped or failed reply is never saved.
+    private func sendLocal(message: String, previousTurns: [ChatTurn]) {
+        if let reason = localModel.reason(), reason != .modelLoading {
+            // Never load a model that is not downloaded or was unloaded for memory.
+            status = .failed(reason.userMessage)
+            return
+        }
+        status = .loadingModel
+        streamingText = ""
+        let localModel = localModel
+        task = Task {
+            defer {
+                streamingText = ""
+                task = nil
+            }
+            // Memory is optional context. The section is not deducted from the history budget,
+            // so it uses the small on-device limit.
+            let memory = (try? await notes.allMemory()) ?? []
+            let section = ConversationContext.memorySection(memory: memory, limit: .appleLocal)
+            let client = await localModel.client()
+            if Task.isCancelled {
+                status = .failed(RunFailureText.stopped)
+                return
+            }
+            guard let client else {
+                status = .failed(localModel.reason()?.userMessage ?? MLXRuntime.loadFailedText)
+                return
+            }
+            status = .running
+            let messages = LocalChat.messages(memorySection: section, history: previousTurns, message: message)
+            var reply = ""
+            do {
+                for try await chunk in LocalChat.stream(client: client, messages: messages) {
+                    reply += chunk
+                    streamingText = reply
+                }
+            } catch {
+                // Never show `error` itself: it may carry model output.
+                status = .failed(Task.isCancelled || error is CancellationError
+                    ? RunFailureText.stopped : LLMErrorDescriber.userMessage(for: error))
+                return
+            }
+            // A cancelled consumer ends the stream without an error.
+            if Task.isCancelled {
+                status = .failed(RunFailureText.stopped)
+                return
+            }
+            let turn = ChatTurn(role: .assistant, text: reply.isEmpty ? RunFailureText.emptyReply : reply)
+            do {
+                try repository.append(turn, to: conversation, choice: .mlxLocal)
+            } catch {
+                status = .failed(Self.saveFailedMessage)
+                return
+            }
+            turns.append(turn)
+            status = .idle
+        }
     }
 
     /// What `finish` needs to know about one send.
     private struct TurnInfo {
-        let choice: ModelChoice
+        let model: AgentModel
         let message: String
         /// The plain tools (not gated, not recorded): a rescued call runs these after its own approval.
         let tools: [RegisteredTool<EmptyContext>]
@@ -229,7 +323,7 @@ final class ChatSession {
             }
             let reply = ChatTurn(role: .assistant, text: replyText.isEmpty ? RunFailureText.emptyReply : replyText)
             do {
-                try repository.append(reply, to: conversation, choice: turn.choice)
+                try repository.append(reply, to: conversation, choice: turn.model.choice)
             } catch {
                 status = .failed(Self.saveFailedMessage)
                 return
@@ -275,14 +369,14 @@ final class ChatSession {
 
     /// Measurement log for every completed turn; capability evidence for the on-device model only.
     private func record(_ use: ToolUse, turn: TurnInfo) {
-        let model = "model=\(turn.choice.rawValue)"
+        let model = "model=\(turn.model.choice.rawValue)"
         switch use {
         case let .native(tool): self.log("toolcall.native \(model) tool=\(tool)")
         case let .rescued(tool): self.log("toolcall.rescued \(model) tool=\(tool)")
         case .ambiguous: self.log("toolcall.ambiguous \(model)")
         case .none: self.log("toolcall.none \(model)")
         }
-        guard turn.choice != .claude else { return }
+        guard turn.model == .appleLocal else { return }
         switch use {
         case .native: tracker.recordNativeToolCall()
         case .rescued: tracker.recordRescue()

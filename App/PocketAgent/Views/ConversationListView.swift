@@ -45,7 +45,7 @@ struct ConversationListView: View {
             ChatView(
                 conversation: conversation, settings: settings,
                 credentials: credentials, availability: availability, journal: journal,
-                measurementLog: measurementLog)
+                mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

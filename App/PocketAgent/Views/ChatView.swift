@@ -9,6 +9,8 @@ struct ChatView: View {
     let credentials: any CredentialStore
     let availability: any ModelAvailabilityChecking
     let journal: any JournalStore
+    let mlxStore: MLXModelStore
+    let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
 
     @Environment(\.modelContext) private var modelContext
@@ -35,6 +37,7 @@ struct ChatView: View {
                 broker: broker,
                 resolve: ChatSession.liveResolver(
                     credentials: credentials, availability: availability, settings: settings),
+                localModel: MLXLocalModelAccess(store: mlxStore, runtime: mlxRuntime),
                 log: { measurementLog.append($0) })
         }
         .onDisappear { session?.stop() }
@@ -48,7 +51,7 @@ private struct ChatContent: View {
 
     @State private var input = ""
 
-    private var isRunning: Bool { session.status == .running }
+    private var isRunning: Bool { session.isBusy }
 
     var body: some View {
         ScrollViewReader { proxy in

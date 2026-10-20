@@ -3,13 +3,13 @@ import SwiftUI
 
 @main
 struct PocketAgentApp: App {
-    @State private var settings = ModelSettings()
+    @State private var settings: ModelSettings
     @State private var mlxStore: MLXModelStore
     @State private var mlxRuntime: MLXRuntime
     @State private var container: ModelContainer?
     /// The one journal store for the app (a second instance could hand out duplicate sequences).
     @State private var journal: SwiftDataJournalStore?
-    private let credentials = KeychainCredentialStore()
+    private let credentials: KeychainCredentialStore
     private let availability = AppleLocalAvailability()
     private let measurementLog = MeasurementLog()
     @State private var developer = DeveloperSettings()
@@ -17,6 +17,13 @@ struct PocketAgentApp: App {
         service: "com.beesan82.pocketagent.github", account: "measurement-token")
 
     init() {
+        let credentials = KeychainCredentialStore()
+        self.credentials = credentials
+        let settings = ModelSettings()
+        // Once per install: a Claude choice without an API key moves to the downloaded model.
+        settings.migrateDefaultModelIfNeeded(credentials: credentials)
+        _settings = State(initialValue: settings)
+
         // One store and one runtime for the whole app; the runtime reads the store's directory.
         let store = MLXModelStore()
         _mlxStore = State(initialValue: store)

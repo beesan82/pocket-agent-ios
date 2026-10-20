@@ -136,6 +136,8 @@ struct ChatSessionTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defaults.removePersistentDomain(forName: name)
         settings = ModelSettings(defaults: defaults)
+        // These tests cover the Claude and Apple paths; the app default is the downloaded model.
+        settings.choice = .claude
     }
 
     private func makeSession(
@@ -146,7 +148,7 @@ struct ChatSessionTests {
     ) -> ChatSession {
         ChatSession(
             conversation: conversation, repository: repository, notes: customNotes ?? notes,
-            settings: settings, broker: broker, resolve: resolve, log: log)
+            settings: settings, broker: broker, resolve: resolve, localModel: FakeLocalModel(), log: log)
     }
 
     /// What the on-device model wrote on the iPhone instead of calling save_note.
@@ -369,7 +371,8 @@ struct ChatSessionTests {
         let lines = LogLines()
         let session = ChatSession(
             conversation: try repository.create(choice: .appleLocal), repository: repository, notes: notes,
-            settings: settings, broker: broker, resolve: { _, _ in .success(fake) }, log: { lines.append($0) })
+            settings: settings, broker: broker, resolve: { _, _ in .success(fake) }, localModel: FakeLocalModel(),
+            log: { lines.append($0) })
 
         session.send("私の名前はケイタ 覚えておいて")
         #expect(try await waitUntil { broker.pending != nil })
