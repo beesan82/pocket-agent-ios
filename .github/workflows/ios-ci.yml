@@ -35,7 +35,7 @@ jobs:
       - name: Secret scan (AT-11, minimal)
         run: bash ci/secret-scan.sh
 
-      - name: Select Xcode 26.x
+      - name: Select Xcode 27.x
         run: bash ci/select-xcode.sh
 
       - name: Core package tests
