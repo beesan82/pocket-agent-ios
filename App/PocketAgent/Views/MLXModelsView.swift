@@ -20,7 +20,6 @@ struct MLXModelsView: View {
         }
         .navigationTitle("モデル管理")
         .task { store.refresh() }
-        .modelDownloadDialogs(flow)
     }
 
     @ViewBuilder

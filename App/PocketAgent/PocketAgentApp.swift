@@ -52,6 +52,8 @@ struct PocketAgentApp: App {
                     developer: developer, tokenStore: tokenStore, journal: journal)
                     .modelContainer(container)
                     .environment(downloadFlow)
+                    // The only presenter of the download / delete confirmations.
+                    .modelDownloadDialogs(downloadFlow)
                     // Logged once here, not per screen (Settings and the models screen share the flow).
                     .onChange(of: downloadFlow.statusSnapshot) { old, new in
                         downloadFlow.logDownloadTransitions(from: old, to: new)

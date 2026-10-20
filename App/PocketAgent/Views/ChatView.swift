@@ -70,7 +70,7 @@ private struct ChatContent: View {
     /// The downloaded model is not on the device (checked before sending, or the send just failed on it).
     private var needsModelDownload: Bool {
         guard settings.choice == .mlxLocal else { return false }
-        if case let .failed(message) = session.status, message == ModelUnavailableReason.modelNotDownloaded.userMessage {
+        if session.lastFailureReason == .modelNotDownloaded {
             return true
         }
         return JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == .modelNotDownloaded

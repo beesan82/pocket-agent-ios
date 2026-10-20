@@ -112,7 +112,6 @@ struct SettingsView: View {
             Button("キャンセル", role: .cancel) {}
         }
         .task { refresh() }
-        .modelDownloadDialogs(downloadFlow)
     }
 
     private func choiceRow(_ choice: ModelChoice, title: String) -> some View {
