@@ -25,7 +25,7 @@ workflows:
         XCODE_PROJECT: PocketAgent.xcodeproj
         XCODE_SCHEME: PocketAgent
         APP_STORE_APPLE_ID: "6824194188"
-      xcode: latest
+      xcode: "27.0"
     scripts:
       - name: Install Metal toolchain (Xcode 26 ships it as a separate component; MLX compiles .metal files)
         script: |
@@ -76,7 +76,7 @@ workflows:
         XCODE_SCHEME: FMHarness
         APP_STORE_APPLE_ID: "6824194188"
         SPIKE_APP_ATTEST: "0"
-      xcode: latest
+      xcode: "27.0"
     scripts:
       - name: Require Xcode 27 and install Metal toolchain
         script: |
