@@ -59,6 +59,11 @@
 ## builder に任せること
 ファイル分割、`MLXModelsView` からの共通部品の切り出し方、逐次表示の吹き出しの見た目、`streamingText` の持ち方。
 
+## ユーザー決定（2026-10-21）
+- 「本体アプリの既定はダウンロードモデル（Qwen2.5 1.5B）」（FM ハーネスのセッション経由で伝達）。
+- 実装: `ModelSettings` の既定 choice と未知の rawValue の扱いを `.mlxLocal` に。初回起動で未ダウンロードなら、チャット送信時に理由と設定への導線を出す（自動ダウンロードはしない）。Apple の選択肢は変更なし。
+- 移行（一度だけ、`pocketagent.defaultModelMigrated`）: 保存済み choice が `.claude` で Claude の API キーが保存されていなければ `.mlxLocal` に切り替える。キーがあれば `.claude` のまま。
+
 ## 筆者の判断（レビュー時に見てほしい点）
 - 選択済みのダウンロードモデルを削除しても `choice` は `.mlxLocal` のまま（送信時に理由表示）。日誌とチャットはダウンロードモデルの選択を共有し、設定の説明文で明示する。旧データの移行は不要（rawValue 追加のみ）。
 - 生成パラメータは全候補で共通（temperature 0.7 / top_p 0.8 / repetition_penalty 1.1）。
