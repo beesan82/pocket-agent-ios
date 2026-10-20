@@ -18,7 +18,12 @@ final class SpikeLog {
     }
 
     var text: String { lines.joined(separator: "\n") }
-    func clear() { lines.removeAll() }
+    func clear() { lines.removeAll(); summaries.removeAll() }
+
+    /// One short line per experiment, so the copy fits TestFlight's 400-character comment.
+    private(set) var summaries: [String] = []
+    func addSummary(_ line: String) { summaries.append(line); add("結果 " + line) }
+    var summaryText: String { summaries.joined(separator: "\n") }
 }
 
 /// Spike-only note store (in memory). The spike checks that the tool runs, not persistence.

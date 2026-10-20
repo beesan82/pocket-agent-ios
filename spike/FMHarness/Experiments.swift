@@ -2,11 +2,12 @@ import Foundation
 import FoundationModels
 
 /// Isolates why a 2nd MLX turn garbles / skips the tool (feedback ADbZQHomlI8E).
-/// Each trial uses a fresh session and auto-approval; the summary is one log line.
+/// Each trial uses a fresh session and auto-approval; the summary is one short line.
 enum Sampling: String, CaseIterable, Identifiable {
     case providerDefault = "既定（温度 0.6・足切りなし）"
     case greedy = "greedy（毎回同じ）"
     var id: String { rawValue }
+    var short: String { self == .greedy ? "g" : "既" }
 
     var options: GenerationOptions {
         switch self {
@@ -21,6 +22,7 @@ enum Experiment: String, CaseIterable, Identifiable {
     case afterChat = "B: 雑談の後の2ターン目"
     case afterTool = "C: ツール保存の後の2ターン目"
     var id: String { rawValue }
+    var short: String { String(rawValue.prefix(1)) }
 
     /// Turn sent before the measured one (nil = measured turn is the first).
     var warmup: String? {
@@ -50,6 +52,9 @@ func runExperiment(
 ) async {
     var called = 0
     var finished = 0
+    var warmupCalled = 0  // C only: the 1st turn's save_note succeeded
+    var faked = 0  // reply says 保存 without a tool call
+    var textCalls = 0  // the call was written into the reply text instead of a real tool call
     log.add("実験 \(experiment.rawValue) / \(sampling.rawValue) / \(backend.rawValue) × \(trials)")
     for trial in 1...trials {
         if Task.isCancelled { break }
@@ -57,13 +62,19 @@ func runExperiment(
             let session = try makeSession(backend, tools: makeTools(), clientID: clientID)
             if let warmup = experiment.warmup {
                 let first = try await session.respond(to: warmup, options: sampling.options)
+                if toolCallCount(session) > 0 { warmupCalled += 1 }
                 log.add("  #\(trial) 1ターン目 ← \(first.content)")
             }
             let before = toolCallCount(session)
             let started = Date()
             let reply = try await session.respond(to: Experiment.measuredPrompt, options: sampling.options)
             let didCall = toolCallCount(session) > before
-            if didCall { called += 1 }
+            if didCall {
+                called += 1
+            } else {
+                if reply.content.contains("保存") { faked += 1 }
+                if reply.content.contains("save_note") || reply.content.contains("(\"") { textCalls += 1 }
+            }
             finished += 1
             log.add(String(format: "  #%d 測定ターン %.1fs tool=%@ ← %@", trial,
                            Date().timeIntervalSince(started), didCall ? "yes" : "NO", reply.content))
@@ -71,5 +82,10 @@ func runExperiment(
             log.add("  #\(trial) error: \(String(reflecting: error))")
         }
     }
-    log.add("結果 \(experiment.rawValue) / \(sampling.rawValue): ツール呼び出し \(called)/\(finished)")
+    // e.g. "C既 呼0/5 偽2 文1 初3"
+    // 呼 = tool called, 偽 = claims saved without calling, 文 = call written as text,
+    // 初 = (C) 1st-turn save succeeded
+    var line = "\(experiment.short)\(sampling.short) 呼\(called)/\(finished) 偽\(faked) 文\(textCalls)"
+    if experiment == .afterTool { line += " 初\(warmupCalled)" }
+    log.addSummary(line)
 }
