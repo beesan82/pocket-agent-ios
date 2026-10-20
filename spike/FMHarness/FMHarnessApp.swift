@@ -14,7 +14,7 @@ struct SpikeView: View {
     @State private var log = SpikeLog()
     @State private var notes = NoteBox()
     @State private var approvals = ApprovalCenter()
-    @State private var backend: Backend = .claudeAPIKey
+    @State private var backend: Backend = .system
     @State private var sessions: [Backend: LanguageModelSession] = [:]
     @State private var prompt = "私の名前はケイタ 覚えておいて"
     @State private var running: Task<Void, Never>?
