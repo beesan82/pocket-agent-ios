@@ -57,3 +57,59 @@ workflows:
         # Internal testing needs no Beta App Review; true failed post-processing on build 2
         # (external review needs test info). Internal group gets builds via automatic distribution.
         submit_to_testflight: false
+
+  # THROWAWAY (spike/fm-harness only): FMHarness spike app → TestFlight, same bundle ID / record.
+  # Start manually on branch spike/fm-harness. Set SPIKE_APP_ATTEST=1 in the build's env vars only
+  # after enabling App Attest on the App ID and re-fetching the App Store profile (item 5).
+  spike-fm-testflight:
+    name: FM Spike TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: Pocket Agent ASC
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.beesan82.pocketagent
+      vars:
+        XCODE_PROJECT: FMHarness.xcodeproj
+        XCODE_SCHEME: FMHarness
+        APP_STORE_APPLE_ID: "6824194188"
+        SPIKE_APP_ATTEST: "0"
+      xcode: latest
+    scripts:
+      - name: Require Xcode 27 and install Metal toolchain
+        script: |
+          xcodebuild -version | grep -q "Xcode 27" || { echo "Xcode 27 required"; exit 1; }
+          xcodebuild -downloadComponent MetalToolchain
+      - name: Generate Xcode project
+        script: |
+          cd spike
+          if [ "$SPIKE_APP_ATTEST" = "1" ]; then
+            perl -0pi -e 's|(        TARGETED_DEVICE_FAMILY: "1"\n)|$1        CODE_SIGN_ENTITLEMENTS: FMHarness/AppAttest.entitlements\n|' project.yml
+            grep -n CODE_SIGN_ENTITLEMENTS project.yml
+          fi
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
+            -skipMacroValidation -skipPackagePluginValidation
+      - name: Apply signing profiles
+        script: cd spike && xcode-project use-profiles
+      - name: Set build number (latest TestFlight build + 1)
+        script: |
+          cd spike
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          agvtool new-version -all $((LATEST + 1))
+      - name: Build signed ipa
+        script: |
+          cd spike
+          xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME" \
+            --archive-xcargs "-skipMacroValidation -skipPackagePluginValidation"
+    artifacts:
+      - spike/build/ios/ipa/*.ipa
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false

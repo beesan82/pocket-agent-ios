@@ -84,6 +84,9 @@ struct SpikeView: View {
                         Button("拒否", role: .cancel) { approvals.resolve(false) }
                         Button("保存する") { approvals.resolve(true) }.buttonStyle(.borderedProminent)
                     }
+                    // Item 4: cancel the whole respond() while Tool.call is still waiting.
+                    Button("応答をキャンセル（承認待ちのまま）", role: .destructive) { running?.cancel() }
+                        .font(.footnote)
                 }
                 .padding()
                 .presentationDetents([.medium])
