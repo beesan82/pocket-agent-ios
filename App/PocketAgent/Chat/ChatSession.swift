@@ -103,6 +103,12 @@ final class ChatSession {
         }
         turns.append(userTurn)
 
+        // Temporary until the MLX chat path lands: report instead of resolving.
+        if choice == .mlxLocal {
+            status = .failed(ModelUnavailableReason.modelNotDownloaded.userMessage)
+            return
+        }
+
         // Tool placement follows the choice: on-device tools run inside the client's
         // session, so they are gated there and the runner gets none. Every tool records
         // its native calls, so a native call is told apart from a missed one:
@@ -113,7 +119,7 @@ final class ChatSession {
         let tools = NoteTools.make(store: notes, limit: choice == .claude ? .claude : .appleLocal)
         let recorder = ToolCallRecorder()
         let appleLocalTools: [any AnyTool<EmptyContext>] = switch choice {
-        case .claude: []
+        case .claude, .mlxLocal: []
         case .appleLocal: ToolApprovalGate.wrap(tools, approval: handler).map { gated -> any AnyTool<EmptyContext> in
                 RecordingTool(inner: gated, recorder: recorder)
             }
@@ -130,7 +136,7 @@ final class ChatSession {
         case .claude: tools.map {
                 RegisteredTool<EmptyContext>(RecordingTool(inner: $0.tool, recorder: recorder), risk: $0.risk)
             }
-        case .appleLocal: []
+        case .appleLocal, .mlxLocal: []
         }
 
         status = .running
@@ -149,7 +155,7 @@ final class ChatSession {
                 systemPrompt = ConversationContext.claudeSystemPrompt(memorySection: section)
                 prompt = message
                 history = ConversationContext.history(from: previousTurns, budget: .claude)
-            case .appleLocal:
+            case .appleLocal, .mlxLocal:
                 systemPrompt = ConversationContext.systemPrompt
                 prompt = ConversationContext.appleLocalPrompt(
                     history: previousTurns, message: message, memorySection: section)

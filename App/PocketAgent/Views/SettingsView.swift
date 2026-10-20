@@ -28,7 +28,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
-                ForEach(ModelChoice.allCases, id: \.self) { choice in
+                ForEach(ModelChoice.allCases.filter { $0 != .mlxLocal }, id: \.self) { choice in
                     Button {
                         settings.choice = choice
                     } label: {

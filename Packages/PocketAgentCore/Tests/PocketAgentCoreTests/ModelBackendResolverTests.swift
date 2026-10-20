@@ -195,4 +195,30 @@ struct ModelBackendResolverTests {
         #expect(ModelChoice.appleLocal.rawValue == "appleLocal")
         #expect(ModelChoice(rawValue: "appleLocal") == .appleLocal)
     }
+
+    @Test func mlxLocalRawValueIsStable() {
+        #expect(ModelChoice.mlxLocal.rawValue == "mlxLocal")
+        #expect(ModelChoice(rawValue: "mlxLocal") == .mlxLocal)
+        #expect(ModelChoice.mlxLocal.displayName == "ダウンロードモデル（端末内）")
+    }
+
+    @Test func mlxLocalIsLocal() {
+        #expect(ModelChoice.mlxLocal.isLocal)
+        #expect(ModelChoice.appleLocal.isLocal)
+        #expect(!ModelChoice.claude.isLocal)
+    }
+
+    // Out of scope for the shared resolver: it fails safely and touches nothing.
+    @Test func mlxLocalNeverReadsKeyOrBuildsClients() {
+        let store = SpyCredentialStore(key: "test-key")
+        let availability = StubAvailability(nil)
+        let claude = Counter(), apple = Counter()
+        let resolver = makeResolver(store: store, availability: availability, claudeCalls: claude, appleCalls: apple)
+
+        #expect(resolver.resolve(.mlxLocal) == .failure(.unavailable(.modelNotDownloaded)))
+        #expect(store.reads == 0)
+        #expect(claude.count == 0)
+        #expect(apple.count == 0)
+        #expect(availability.checks == 0)
+    }
 }

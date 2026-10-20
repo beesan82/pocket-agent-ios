@@ -258,7 +258,7 @@ struct ChatSessionTests {
             let client: any LLMClient = switch choice {
             case .claude:
                 claudeFake
-            case .appleLocal:
+            case .appleLocal, .mlxLocal:
                 FakeLLMClient(
                     [.runOwnTool(name: NoteToolName.save, arguments: Self.json(["text": "二つ目"]))],
                     ownTools: appleLocalTools, foundationModelsContract: true)

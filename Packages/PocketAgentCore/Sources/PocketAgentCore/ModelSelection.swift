@@ -4,11 +4,16 @@ import Foundation
 public enum ModelChoice: String, Sendable, CaseIterable, Codable {
     case claude
     case appleLocal
+    case mlxLocal
+
+    /// Runs on the device: the conversation never goes to the cloud.
+    public var isLocal: Bool { self != .claude }
 
     public var displayName: String {
         switch self {
         case .claude: "Claude（クラウド）"
         case .appleLocal: "Appleローカル（端末内）"
+        case .mlxLocal: "ダウンロードモデル（端末内）"
         }
     }
 }
@@ -98,6 +103,10 @@ public struct ModelBackendResolver<Backend>: Sendable {
 
     public func resolve(_ choice: ModelChoice) -> Result<Backend, ModelResolutionError> {
         switch choice {
+        case .mlxLocal:
+            // The MLX chat path has its own entry point; this resolver never serves it
+            // and must not read the Claude key on its behalf.
+            return .failure(.unavailable(.modelNotDownloaded))
         case .appleLocal:
             if let reason = availability.appleLocalUnavailableReason() {
                 return .failure(.unavailable(reason))
