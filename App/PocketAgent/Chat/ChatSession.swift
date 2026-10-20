@@ -26,8 +26,11 @@ final class ChatSession {
     private(set) var turns: [ChatTurn]
     private(set) var status = Status.idle
     /// The on-device model kept failing to use the note tools in this conversation (requirements §6.4).
-    /// Never true for Claude.
-    private(set) var isToolSupportLimited = false
+    /// Follows the current selection, so it is never true while Claude is selected.
+    var isToolSupportLimited: Bool {
+        let current = settings.choice
+        return current != .claude && current == lastChoice && tracker.isLimited
+    }
 
     @ObservationIgnored private let conversation: ConversationRecord
     @ObservationIgnored private let repository: ConversationRepository
@@ -37,8 +40,9 @@ final class ChatSession {
     @ObservationIgnored private let approvalHandler: ToolApprovalGate.ApprovalHandler
     @ObservationIgnored private let log: @MainActor (String) -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private var tracker = ToolCapabilityTracker()
-    @ObservationIgnored private var lastChoice: ModelChoice?
+    // Observed: `isToolSupportLimited` is derived from these.
+    private var tracker = ToolCapabilityTracker()
+    private var lastChoice: ModelChoice?
 
     init(
         conversation: ConversationRecord,
@@ -88,7 +92,6 @@ final class ChatSession {
             tracker.reset()
             lastChoice = choice
         }
-        if choice == .claude { isToolSupportLimited = false }
 
         let previousTurns = turns
         let userTurn = ChatTurn(role: .user, text: message)
@@ -102,16 +105,18 @@ final class ChatSession {
 
         // Tool placement follows the choice: on-device tools run inside the client's
         // session, so they are gated there and the runner gets none. Every tool records
-        // when it actually executes, so a native call is told apart from a missed one.
+        // its native calls, so a native call is told apart from a missed one:
+        // - Claude: AgentRunKit asks before `execute`, so only executed calls are recorded.
+        // - On device: the recorder sits outside the gate, so a call the user denies still
+        //   counts as native and the same reply is never rescued and asked about again.
         let handler = approvalHandler
         let tools = NoteTools.make(store: notes, limit: choice == .claude ? .claude : .appleLocal)
         let recorder = ToolCallRecorder()
-        let recordingTools = tools.map {
-            RegisteredTool<EmptyContext>(RecordingTool(inner: $0.tool, recorder: recorder), risk: $0.risk)
-        }
         let appleLocalTools: [any AnyTool<EmptyContext>] = switch choice {
         case .claude: []
-        case .appleLocal: ToolApprovalGate.wrap(recordingTools, approval: handler)
+        case .appleLocal: ToolApprovalGate.wrap(tools, approval: handler).map { gated -> any AnyTool<EmptyContext> in
+                RecordingTool(inner: gated, recorder: recorder)
+            }
         }
         let client: any LLMClient
         switch resolve(choice, appleLocalTools) {
@@ -122,7 +127,9 @@ final class ChatSession {
             return
         }
         let runnerTools: [RegisteredTool<EmptyContext>] = switch choice {
-        case .claude: recordingTools
+        case .claude: tools.map {
+                RegisteredTool<EmptyContext>(RecordingTool(inner: $0.tool, recorder: recorder), risk: $0.risk)
+            }
         case .appleLocal: []
         }
 
@@ -189,6 +196,11 @@ final class ChatSession {
         defer { task = nil }
         switch result {
         case let .success(.completed(text)):
+            // `stop()` may have landed after the run returned (e.g. while reading the recorder).
+            if Task.isCancelled {
+                status = .failed(RunFailureText.stopped)
+                return
+            }
             let use: ToolUse
             var replyText = text
             if let native = turn.nativeTool {
@@ -209,8 +221,6 @@ final class ChatSession {
                     use = .none
                 }
             }
-            record(use, turn: turn)
-
             let reply = ChatTurn(role: .assistant, text: replyText.isEmpty ? RunFailureText.emptyReply : replyText)
             do {
                 try repository.append(reply, to: conversation, choice: turn.choice)
@@ -219,6 +229,8 @@ final class ChatSession {
                 return
             }
             turns.append(reply)
+            // Only a completed, saved turn is logged and counted.
+            record(use, turn: turn)
             status = .idle
         case let .success(outcome):
             status = .failed(RunFailureText.message(for: outcome) ?? RunFailureText.stopped)
@@ -264,17 +276,13 @@ final class ChatSession {
         case .ambiguous: self.log("toolcall.ambiguous \(model)")
         case .none: self.log("toolcall.none \(model)")
         }
-        guard turn.choice != .claude else {
-            isToolSupportLimited = false
-            return
-        }
+        guard turn.choice != .claude else { return }
         switch use {
         case .native: tracker.recordNativeToolCall()
         case .rescued: tracker.recordRescue()
         case .ambiguous: break
         case .none: tracker.recordNoToolCall(userMessage: turn.message)
         }
-        isToolSupportLimited = tracker.isLimited
     }
 
     /// What the approval sheet says the tool will do.
@@ -311,8 +319,7 @@ private actor ToolCallRecorder {
     }
 }
 
-/// Forwards everything to `inner` and records the call when it executes.
-/// It sits inside the approval gate, so a denied call is never recorded.
+/// Forwards everything to `inner` and records the call when the model makes it.
 private struct RecordingTool: AnyTool {
     typealias Context = EmptyContext
 

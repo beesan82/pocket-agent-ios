@@ -524,6 +524,52 @@ struct ChatSessionTests {
         #expect(lines.entries == ["toolcall.none model=appleLocal", "toolcall.none model=appleLocal"])
     }
 
+    // The chat screen outlives a model switch in settings: the notice follows the current selection.
+    @Test func limitedNoticeFollowsCurrentSelectionWithoutSending() async throws {
+        settings.choice = .appleLocal
+        let fake = FakeLLMClient([.finish("わかりました"), .finish("了解です")], foundationModelsContract: true)
+        let session = makeSession(try repository.create(choice: .appleLocal)) { _, _ in .success(fake) }
+
+        session.send("牛乳を覚えて")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        session.send("歯医者をメモ")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 4 })
+        #expect(session.isToolSupportLimited)
+
+        settings.choice = .claude
+        #expect(!session.isToolSupportLimited)
+
+        // No turn ran on another model, so the evidence for this model still stands.
+        settings.choice = .appleLocal
+        #expect(session.isToolSupportLimited)
+    }
+
+    // A native call the user denies is still a native call: the reply is not rescued and asked again.
+    @Test func appleLocalDeniedNativeCallIsNotRescued() async throws {
+        settings.choice = .appleLocal
+        let lines = LogLines()
+        let session = makeSession(try repository.create(choice: .appleLocal), log: { lines.append($0) }) {
+            _, appleLocalTools in
+            .success(FakeLLMClient(
+                [.runOwnTool(name: NoteToolName.save, arguments: Self.json(["text": "牛乳"]))],
+                ownTools: appleLocalTools, foundationModelsContract: true))
+        }
+
+        session.send("牛乳を覚えて")
+        #expect(try await waitUntil { broker.pending != nil })
+        #expect(broker.pending?.approval.toolName == NoteToolName.save)
+        broker.answer(.deny(reason: nil))
+
+        // A second dialog (a rescue) would stop the wait with `pending` set.
+        #expect(try await waitUntil { session.status != .running || broker.pending != nil })
+        #expect(broker.pending == nil)
+        #expect(session.status == .idle)
+        #expect(session.turns.count == 2)
+        #expect(try await notes.all().isEmpty)
+        #expect(lines.entries == ["toolcall.native model=appleLocal tool=save_note"])
+        #expect(!session.isToolSupportLimited)
+    }
+
     @Test func nativeToolCallIsLoggedAsNative() async throws {
         let fake = FakeLLMClient([
             .callTool(name: NoteToolName.save, arguments: Self.json(["text": "牛乳"])),
