@@ -44,7 +44,7 @@ func claudeModel(auth: AuthMode) -> ClaudeLanguageModel {
 
 /// One `LanguageModelSession` per backend; kept across sends so the transcript carries
 /// multiple turns (spike item 4).
-func makeSession(_ backend: Backend, tools: [any Tool], clientID: String) throws -> LanguageModelSession {
+func makeSession(_ backend: Backend, tools: [any FoundationModels.Tool], clientID: String) throws -> LanguageModelSession {
     switch backend {
     case .claudeAPIKey:
         guard let key = SpikeKeychain.readAPIKey(), !key.isEmpty else { throw BackendError.noAPIKey }
@@ -63,7 +63,7 @@ func makeSession(_ backend: Backend, tools: [any Tool], clientID: String) throws
     }
 }
 
-private func session<M: LanguageModel>(_ model: M, tools: [any Tool]) -> LanguageModelSession {
+private func session<M: FoundationModels.LanguageModel>(_ model: M, tools: [any FoundationModels.Tool]) -> LanguageModelSession {
     LanguageModelSession(model: model, tools: tools, instructions: instructions)
 }
 

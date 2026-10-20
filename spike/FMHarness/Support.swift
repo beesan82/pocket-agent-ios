@@ -62,11 +62,11 @@ final class ApprovalCenter {
 
 /// Reads / writes the same Keychain item Pocket Agent uses (same bundle ID → same access group).
 enum SpikeKeychain {
-    private static let query: [String: Any] = [
+    private static var query: [String: Any] { [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "com.beesan82.pocketagent.anthropic",
         kSecAttrAccount as String: "api-key",
-    ]
+    ] }
 
     static func readAPIKey() -> String? {
         var q = query
