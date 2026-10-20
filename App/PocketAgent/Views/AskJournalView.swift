@@ -31,7 +31,8 @@ struct AskJournalView: View {
     private var isBusy: Bool { preparing || session.isRunning }
     private var canAsk: Bool {
         !isBusy && !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (mlxRuntime.client != nil || JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == nil)
+            && (JournalModelAccess.readyClient(store: mlxStore, runtime: mlxRuntime) != nil
+                || JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == nil)
     }
 
     var body: some View {
@@ -51,7 +52,7 @@ struct AskJournalView: View {
                     Button("聞く") { ask() }
                         .disabled(!canAsk)
                 }
-                if mlxRuntime.client == nil {
+                if JournalModelAccess.readyClient(store: mlxStore, runtime: mlxRuntime) == nil {
                     JournalModelStatusView(store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog)
                 }
             } header: {

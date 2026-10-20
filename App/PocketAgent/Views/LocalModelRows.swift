@@ -15,6 +15,7 @@ final class ModelDownloadFlow {
 
     let store: MLXModelStore
     let measurementLog: MeasurementLog
+    let runtime: MLXRuntime
 
     var pendingDownload: PendingDownload?
     var pendingDelete: MLXModelInfo?
@@ -23,9 +24,10 @@ final class ModelDownloadFlow {
     @ObservationIgnored private let probe = NetworkCostProbe()
     @ObservationIgnored private var downloadStarts: [String: ContinuousClock.Instant] = [:]
 
-    init(store: MLXModelStore, measurementLog: MeasurementLog) {
+    init(store: MLXModelStore, runtime: MLXRuntime, measurementLog: MeasurementLog) {
         self.store = store
         self.measurementLog = measurementLog
+        self.runtime = runtime
     }
 
     func prepareDownload(_ model: MLXModelInfo) {
@@ -59,6 +61,7 @@ final class ModelDownloadFlow {
     }
 
     func confirmDelete(_ model: MLXModelInfo) {
+        runtime.modelDeleted(model)
         store.delete(model)
         measurementLog.append("モデル削除: \(model.displayName)")
     }

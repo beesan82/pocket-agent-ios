@@ -30,12 +30,11 @@ struct RoundTripView: View {
                     Button("停止", role: .destructive) { task?.cancel() }
                 } else {
                     Button("送信") { send() }
-                        .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(settings.choice == .mlxLocal
+                            || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             } footer: {
-                Text(settings.choice == .claude
-                    ? "Claude選択中: 入力はAnthropic APIへ送信されます。"
-                    : "Appleローカル選択中: 端末内で推論し、外部へ送信しません。")
+                Text(footerText)
             }
 
             Section("結果") {
@@ -56,6 +55,14 @@ struct RoundTripView: View {
         }
         .navigationTitle("1往復テスト")
         .onDisappear { task?.cancel() }
+    }
+
+    private var footerText: String {
+        switch settings.choice {
+        case .claude: "Claude選択中: 入力はAnthropic APIへ送信されます。"
+        case .appleLocal: "Appleローカル選択中: 端末内で推論し、外部へ送信しません。"
+        case .mlxLocal: "ダウンロードモデルは1往復テストの対象外です"
+        }
     }
 
     private func send() {

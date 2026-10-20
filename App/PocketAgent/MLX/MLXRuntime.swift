@@ -139,6 +139,11 @@ final class MLXRuntime {
         }
     }
 
+    /// A deleted model must stop being used: drops it when it is loaded or still loading.
+    func modelDeleted(_ model: MLXModelInfo) {
+        if loadedModelID == model.id || loadingModelID == model.id { unload() }
+    }
+
     func unload() {
         cancelLoad()
         dropClient()

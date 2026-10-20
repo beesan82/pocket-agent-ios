@@ -22,10 +22,15 @@ enum JournalModelAccess {
         MLXAvailability.reason(state: runtime.state, status: store.status(of: store.selected))
     }
 
+    /// The loaded client, only when it is the selected model's (a stale one is never reused).
+    static func readyClient(store: MLXModelStore, runtime: MLXRuntime) -> (any LLMClient)? {
+        runtime.loadedModelID == store.selected.id ? runtime.client : nil
+    }
+
     /// The loaded client; loads the selected model first when it is downloaded but not loaded.
     /// Never loads on the simulator or for a model that is not downloaded.
     static func client(store: MLXModelStore, runtime: MLXRuntime) async -> (any LLMClient)? {
-        if let client = runtime.client { return client }
+        if let client = readyClient(store: store, runtime: runtime) { return client }
         switch reason(store: store, runtime: runtime) {
         case nil, .modelLoading?:
             await runtime.load(store.selected)
@@ -41,9 +46,11 @@ struct JournalModelStatusView: View {
     let store: MLXModelStore
     let runtime: MLXRuntime
     let measurementLog: MeasurementLog
+    /// False inside a sheet: the models screen cannot present its confirmations there.
+    var linksToModelManagement = true
 
     var body: some View {
-        if runtime.client != nil {
+        if JournalModelAccess.readyClient(store: store, runtime: runtime) != nil {
             EmptyView()
         } else if runtime.state == .loading {
             HStack(spacing: 8) {
@@ -56,8 +63,13 @@ struct JournalModelStatusView: View {
                 Text(reason.userMessage).font(.footnote).foregroundStyle(.secondary)
                 switch reason {
                 case .modelNotDownloaded:
-                    NavigationLink("モデル管理") {
-                        MLXModelsView(store: store, measurementLog: measurementLog)
+                    if linksToModelManagement {
+                        NavigationLink("モデル管理") {
+                            MLXModelsView(store: store, measurementLog: measurementLog)
+                        }
+                    } else {
+                        Text("設定タブの「ローカル（端末内）」でダウンロードしてください")
+                            .font(.footnote)
                     }
                 case .unloadedForMemory:
                     loadButton

@@ -101,7 +101,7 @@ struct JournalCaptureView: View {
 
     private func start() async {
         guard session == nil else { return }
-        let client = mlxRuntime.client
+        let client = JournalModelAccess.readyClient(store: mlxStore, runtime: mlxRuntime)
         let created = JournalCaptureSession(
             source: request.source, store: journal,
             assistant: client.map { JournalModelAccess.assistant(client: $0) }, modelReady: client != nil)
@@ -134,7 +134,8 @@ private struct CaptureForm: View {
     private var isBusy: Bool { session.phase == .saving }
     /// Loaded, or downloaded and loadable on tap; otherwise the status view shows why not.
     private var canSummarize: Bool {
-        mlxRuntime.client != nil || JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == nil
+        JournalModelAccess.readyClient(store: mlxStore, runtime: mlxRuntime) != nil
+            || JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == nil
     }
 
     var body: some View {
@@ -171,7 +172,9 @@ private struct CaptureForm: View {
                 Section {
                     Button("要約する") { onSummarize() }
                         .disabled(isBusy || isEmpty || !canSummarize || mlxRuntime.state == .loading)
-                    JournalModelStatusView(store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog)
+                    JournalModelStatusView(
+                        store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog,
+                        linksToModelManagement: false)
                     if !canSummarize {
                         Text("要約せずに保存できます。").font(.footnote).foregroundStyle(.secondary)
                     }

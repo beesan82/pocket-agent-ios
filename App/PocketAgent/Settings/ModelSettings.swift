@@ -44,6 +44,8 @@ final class ModelSettings {
             do {
                 key = try credentials.readAPIKey()
             } catch {
+                // Nothing is persisted. An unset choice stays the in-memory .mlxLocal default this launch:
+                // on-device is the privacy-safe direction, never a silent move to the cloud.
                 return
             }
             // Assigned either way so the result is saved, not left to the default.

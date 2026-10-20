@@ -29,10 +29,11 @@ struct PocketAgentApp: App {
         // One store and one runtime for the whole app; the runtime reads the store's directory.
         let store = MLXModelStore()
         _mlxStore = State(initialValue: store)
-        _mlxRuntime = State(initialValue: MLXRuntime(store: store))
+        let runtime = MLXRuntime(store: store)
+        _mlxRuntime = State(initialValue: runtime)
         let log = MeasurementLog()
         measurementLog = log
-        _downloadFlow = State(initialValue: ModelDownloadFlow(store: store, measurementLog: log))
+        _downloadFlow = State(initialValue: ModelDownloadFlow(store: store, runtime: runtime, measurementLog: log))
 
         let container = try? AppModelContainer.make()
         if let container {

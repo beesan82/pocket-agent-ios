@@ -75,6 +75,23 @@ struct ModelSettingsTests {
         #expect(credentials.reads == 1)
     }
 
+    @Test func migrationKeyReadFailureRetriesNextLaunch() {
+        let defaults = makeDefaults()
+        let settings = ModelSettings(defaults: defaults)
+
+        settings.migrateDefaultModelIfNeeded(credentials: ThrowingCredentialStore())
+
+        // Flag unset and nothing persisted; the in-memory default is the on-device model.
+        #expect(settings.choice == .mlxLocal)
+        #expect(defaults.string(forKey: "pocketagent.modelChoice") == nil)
+        #expect(!defaults.bool(forKey: "pocketagent.defaultModelMigrated"))
+
+        let retry = SpyCredentialStore(key: "test-key")
+        ModelSettings(defaults: defaults).migrateDefaultModelIfNeeded(credentials: retry)
+        #expect(retry.reads == 1)
+        #expect(defaults.bool(forKey: "pocketagent.defaultModelMigrated"))
+    }
+
     @Test func migrationRunsOnce() throws {
         let defaults = makeDefaults()
         defaults.set("claude", forKey: "pocketagent.modelChoice")
@@ -126,4 +143,11 @@ struct ModelSettingsTests {
             "pocketagent.modelChoice", "pocketagent.claudeModel", "pocketagent.defaultModelMigrated"
         ]))
     }
+}
+
+private struct ThrowingCredentialStore: CredentialStore {
+    struct Failure: Error {}
+    func readAPIKey() throws -> String? { throw Failure() }
+    func saveAPIKey(_ apiKey: String) throws { throw Failure() }
+    func deleteAPIKey() throws { throw Failure() }
 }
