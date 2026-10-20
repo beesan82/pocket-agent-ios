@@ -21,6 +21,9 @@
   - ログ欄: `Tool.call` の開始・承認待ちの秒数・結果、返答、エラー、所要時間、`isResponding`、トランスクリプトの件数とツール呼び出し名。MLX は `Memory.activeMemory` と `os_proc_available_memory`。「ログをコピー」でクリップボードへ。
 
 ## ビルド
+- 前段0（本体アプリを Xcode 27 / iOS 27 で）: macos-26 には Xcode 27 が無い（run 39434491253）。`xcode-27` ランナーで Xcode 27.0 / iOS 27.0 シミュレータのビルド・全テスト合格（run 39437405259）。main に入れた（9d980d3、ADR-030。main の run 39440157043 で合格）。
+- FM Spike の未署名ビルド（シミュレータ・実機向け）: **合格**（run 39439853953、commit 39ea29b）。初回 run 39437405259 では `Tool` / `LanguageModel` が MLXLMCommon と曖昧になり失敗 → `FoundationModels.` で修飾して解消。
+- 署名付き ipa と TestFlight への配布は**未実施**（Codemagic の Xcode 27 有無、`--archive-xcargs` の指定が通るかも未確認）。
 1. CI（GitHub Actions `xcode-27` ランナー、ジョブ `spike-fm-harness`）でシミュレータ・実機向けの未署名ビルドが通ることを先に確認する。
 2. Codemagic でワークフロー **FM Spike TestFlight**（`spike-fm-testflight`）をブランチ `spike/fm-harness` で手動実行する。
    - Codemagic の `xcode: latest` が Xcode 27 でなければ、最初のステップで止まる（その場合は Codemagic の Xcode 版の指定を見直す）。
