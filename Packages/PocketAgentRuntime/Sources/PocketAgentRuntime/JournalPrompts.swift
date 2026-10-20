@@ -8,11 +8,12 @@ public enum JournalPrompts {
     - 箇条書きにせず、1〜3 文にまとめる。
     - 固有名詞・日時・数字は省かない。
     - 出力形式: 1 行目は「見出し: 」に続けて 15 文字以内の見出し、2 行目以降に要約本文。
+    - 本文の出来事の時刻は、本文に書かれていればそれに従い、書かれていなければ記録日時より前の出来事として扱い、午前・午後を推測で決めない。
     - それ以外の説明や前置きは書かない。
     """
 
     public static func summaryUser(text: String, recordedAt: Date, calendar: Calendar = .current) -> String {
-        "次の文章を要約してください。\n\n\(text)"
+        "記録日時: \(stamp(recordedAt, calendar))\n\n次の文章を要約してください。\n\n\(text)"
     }
 
     public static let termsSystem = """
@@ -35,15 +36,14 @@ public enum JournalPrompts {
     public static func answerUser(
         question: String, packed: [PackedEntry], usedRecentFallback: Bool, now: Date, calendar: Calendar = .current
     ) -> String {
-        let formatter = dayFormatter(calendar)
-        var lines: [String] = []
+        var lines: [String] = ["現在日時: \(stamp(now, calendar))"]
         if usedRecentFallback {
             lines.append("質問に合う日誌が見つからなかったため、直近の日誌を渡します。回答は「直近の日誌から：」で始めてください。")
         }
         lines.append("以下の日誌だけを根拠に、質問に答えてください。")
         for item in packed {
             lines.append("")
-            lines.append("--- 日誌 (\(formatter.string(from: item.entry.createdAt))) ---")
+            lines.append("--- 日誌 (\(format(item.entry.createdAt, "yyyy-MM-dd HH:mm", calendar))) ---")
             lines.append(item.text)
         }
         lines.append("")
@@ -51,13 +51,22 @@ public enum JournalPrompts {
         return lines.joined(separator: "\n")
     }
 
-    /// Gregorian `yyyy-MM-dd` in the calendar's time zone, whatever the calendar's identifier.
-    private static func dayFormatter(_ calendar: Calendar) -> DateFormatter {
+    /// `yyyy-MM-dd HH:mm（曜）` in the calendar's time zone.
+    private static func stamp(_ date: Date, _ calendar: Calendar) -> String {
+        let weekdays = ["日", "月", "火", "水", "木", "金", "土"]
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        let weekday = weekdays[gregorian.component(.weekday, from: date) - 1]
+        return "\(format(date, "yyyy-MM-dd HH:mm", calendar))（\(weekday)）"
+    }
+
+    /// Fixed-pattern Gregorian formatting in the calendar's time zone, whatever the calendar's identifier.
+    private static func format(_ date: Date, _ pattern: String, _ calendar: Calendar) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
+        formatter.dateFormat = pattern
+        return formatter.string(from: date)
     }
 }

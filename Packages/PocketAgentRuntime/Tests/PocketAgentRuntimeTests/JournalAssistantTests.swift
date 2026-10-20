@@ -187,8 +187,9 @@ struct JournalAssistantTests {
 
         #expect(result.usedRecentFallback)
         #expect(result.evidence.map(\.entry.id) == added.reversed().prefix(10).map(\.id))
-        let firstLine = userText(client.calls.last).split(separator: "\n").first.map(String.init) ?? ""
-        #expect(firstLine.contains("直近の日誌から："))
+        let lines = userText(client.calls.last).split(separator: "\n").map(String.init)
+        #expect(lines.first?.hasPrefix("現在日時:") == true)
+        #expect(lines.dropFirst().first?.contains("直近の日誌から：") == true)
         #expect(JournalPrompts.answerSystem.contains("日誌に記録がありません"))
     }
 
@@ -273,15 +274,13 @@ struct JournalAssistantTests {
 
     @Test func summaryPromptCarriesRecordTimeAndWeekday() async throws {
         let now = tokyo.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 23, minute: 9))!
-        let client = ScriptedTextClient(stream: [.deltas([.content("見出し: 夜
-要約")])])
+        let client = ScriptedTextClient(stream: [.deltas([.content("見出し: 夜\n要約")])])
         let assistant = JournalAssistant(client: client, now: { now }, calendar: tokyo)
 
         _ = try await collect(assistant.summarize("歯医者に行った"))
 
         let prompt = userText(client.calls.last)
-        #expect(prompt.hasPrefix("記録日時: 2026-10-20 23:09（月）
-"))
+        #expect(prompt.hasPrefix("記録日時: 2026-10-20 23:09（月）\n"))
         #expect(prompt.contains("歯医者に行った"))
         #expect(JournalPrompts.summarySystem.contains("午前・午後を推測で決めない"))
     }
@@ -296,9 +295,7 @@ struct JournalAssistantTests {
         _ = try await assistant.ask("散歩は？", store: store)
 
         let prompt = userText(client.calls.last)
-        #expect(prompt.hasPrefix("現在日時: 2026-10-20 23:09（火）
-"))
-        #expect(prompt.contains("--- 日誌 (2026-10-20 08:05) ---
-散歩した"))
+        #expect(prompt.hasPrefix("現在日時: 2026-10-20 23:09（火）\n"))
+        #expect(prompt.contains("--- 日誌 (2026-10-20 08:05) ---\n散歩した"))
     }
 }
