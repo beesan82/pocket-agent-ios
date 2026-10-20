@@ -8,6 +8,10 @@ struct ConversationContextTests {
     private func user(_ text: String) -> ChatTurn { ChatTurn(role: .user, text: text) }
     private func assistant(_ text: String) -> ChatTurn { ChatTurn(role: .assistant, text: text) }
 
+    @Test func systemPromptPointsToAskJournal() {
+        #expect(ConversationContext.systemPrompt.contains("日誌に聞く"))
+    }
+
     @Test func historyKeepsOrderAndRoles() {
         let turns = [user("a"), assistant("b"), user("c")]
         let history = ConversationContext.history(from: turns, budget: .claude)

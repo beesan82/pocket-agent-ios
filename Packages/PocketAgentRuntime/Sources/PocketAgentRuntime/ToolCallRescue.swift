@@ -113,6 +113,7 @@ public enum ToolCallRescue {
         for (nameKey, argumentsKey) in [("name", "arguments"), ("tool", "input")] {
             if let name = dictionary[nameKey] as? String, knownTools[name] != nil,
                let arguments = dictionary[argumentsKey] as? [String: Any],
+               Set(arguments.keys) == knownTools[name], arguments.values.allSatisfy({ $0 is String }),
                let normalized = normalize(arguments) {
                 return .call(Call(name: name, arguments: normalized))
             }

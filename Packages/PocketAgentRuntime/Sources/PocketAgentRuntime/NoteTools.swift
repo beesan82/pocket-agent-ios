@@ -31,6 +31,7 @@ public enum NoteToolName {
 /// Only `CancellationError` propagates.
 public enum NoteTools {
     public static let maxNoteLength = 2000
+    private static let maxJournalItemLength = 400
 
     public static func make(store: any MemoryStore, limit: NoteResultLimit) -> [RegisteredTool<EmptyContext>] {
         [
@@ -65,7 +66,7 @@ public enum NoteTools {
                 guard (1 ... maxNoteLength).contains(text.count) else {
                     return .error("メモは1〜\(maxNoteLength)文字で指定してください")
                 }
-                return try await guarded("メモを書き換えできませんでした") {
+                return try await guarded("メモを書き換えられませんでした") {
                     guard let note = try await store.update(id: id, text: text) else {
                         return try await missingOrJournal(id, in: store)
                     }
@@ -154,7 +155,10 @@ public enum NoteTools {
         var truncated = kept.count < notes.count
         let items = kept.map { note -> NoteItem in
             var text = note.text
-            if let maxCharacters = limit.maxCharactersPerNote, text.count > maxCharacters {
+            let maxCharacters = note.kind == .journal
+                ? min(limit.maxCharactersPerNote ?? Self.maxJournalItemLength, Self.maxJournalItemLength)
+                : limit.maxCharactersPerNote
+            if let maxCharacters, text.count > maxCharacters {
                 text = String(text.prefix(maxCharacters))
                 truncated = true
             }

@@ -85,7 +85,7 @@ private struct ChatContent: View {
                 Text(ToolCapabilityTracker.limitedMessage).font(.caption).foregroundStyle(.orange)
             }
             if settings.choice == .claude {
-                Text("Claude選択中: 入力・直近の会話・参照したメモはAnthropicへ送信されます")
+                Text("Claude選択中: 入力・直近の会話・保存済みメモと最近の日誌はAnthropicへ送信されます")
                     .font(.caption).foregroundStyle(.orange)
             }
             HStack(alignment: .bottom) {

@@ -54,6 +54,7 @@ public enum ConversationContext {
     - 返信文を求められたときは、返信の本文だけを書いてください。前置きや説明は付けないでください。
     - メモの保存と削除は、必ずツールを使って行ってください。ツールを呼ばずに保存・削除したと答えてはいけません。
     - \(memoryRule)
+    - 保存済みメモと日誌だけで答えられないときは、日誌タブの『日誌に聞く』を使うよう案内してください。
     """
 
     /// Newest turns that fit the budget, oldest first. `turns` excludes the current user message.

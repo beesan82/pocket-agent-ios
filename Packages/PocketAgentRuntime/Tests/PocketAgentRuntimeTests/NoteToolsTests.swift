@@ -191,6 +191,24 @@ struct NoteToolsTests {
         #expect(found.notes.map(\.kind) == ["journal"])
     }
 
+    @Test func journalItemsAreCappedAt400ButNotesAreNot() async throws {
+        let journal = InMemoryJournalStore()
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: String(repeating: "あ", count: 500)))
+        let tools = NoteTools.make(store: JournalNoteStore(journal: journal), limit: .claude)
+        let list = try JSONDecoder().decode(
+            NoteListJSON.self, from: Data(try await run("list_notes", "{}", in: tools).content.utf8))
+        #expect(list.notes.first?.text.count == 400)
+        #expect(list.truncated)
+
+        let store = InMemoryNoteStore()
+        _ = try await store.add(String(repeating: "あ", count: 500))
+        let noteList = try JSONDecoder().decode(
+            NoteListJSON.self,
+            from: Data(try await run("list_notes", "{}", in: NoteTools.make(store: store, limit: .claude)).content.utf8))
+        #expect(noteList.notes.first?.text.count == 500)
+        #expect(!noteList.truncated)
+    }
+
     @Test func listRespectsLimit() async throws {
         let store = InMemoryNoteStore()
         for index in 0 ..< 12 {

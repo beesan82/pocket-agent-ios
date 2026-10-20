@@ -32,6 +32,13 @@ struct ToolCallRescueTests {
         }
     }
 
+    @Test func namedFormsRequireExactStringArguments() {
+        #expect(ToolCallRescue.extract(from: #"{"name":"delete_note","arguments":{}}"#, knownTools: known) == .none)
+        #expect(ToolCallRescue.extract(
+            from: #"{"name":"edit_note","arguments":{"id":"a","text":"b"}}"#, knownTools: known)
+            == .found(RescuedToolCall(toolName: "edit_note", arguments: #"{"id":"a","text":"b"}"#, remainingText: "")))
+    }
+
     @Test func twoCandidatesAreAmbiguous() {
         let text = #"{"text":"a"} そして {"text":"b"}"#
         #expect(ToolCallRescue.extract(from: text, knownTools: known) == .ambiguous)
