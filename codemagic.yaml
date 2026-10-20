@@ -82,6 +82,10 @@ workflows:
         script: |
           xcodebuild -version | grep -q "Xcode 27" || { echo "Xcode 27 required"; exit 1; }
           xcodebuild -downloadComponent MetalToolchain
+          # Trust package macros (MLXHuggingFace) non-interactively, also for the archive step.
+          # ("Validatation" is Xcode's own spelling of this key.)
+          defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
+          defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
       - name: Generate Xcode project
         script: |
           cd spike
@@ -103,8 +107,9 @@ workflows:
       - name: Build signed ipa
         script: |
           cd spike
+          # "=" form: argparse rejects a separate value that starts with "-".
           xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME" \
-            --archive-xcargs "-skipMacroValidation -skipPackagePluginValidation"
+            --archive-flags="-skipMacroValidation -skipPackagePluginValidation"
     artifacts:
       - spike/build/ios/ipa/*.ipa
       - build/ios/ipa/*.ipa
