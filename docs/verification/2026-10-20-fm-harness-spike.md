@@ -87,9 +87,9 @@
 | 1 Claude + 承認待ち | iPhone 15 / | | 後回し | API 契約なし |
 | 1 Claude + 承認待ち | iPhone 18,5 / | | 後回し | API 契約なし |
 | 2 SystemLanguageModel | iPhone 18,5 / | | 未実施 | |
-| 2 availability | iPhone 15 / | | 未実施 | |
+| 2 availability | iPhone 15 (iPhone15,4) / 27.0.1 | 8 | 期待どおり（使えない） | `respond error: This device does not support Apple Intelligence.`（フィードバック ACq8LAUouAjz, 2026-10-20） |
 | 3 MLX Qwen2.5 1.5B | iPhone 18,5 / | | 未実施 | メモリ: |
-| 3 MLX Qwen2.5 1.5B | iPhone 15 / | | 未実施 | メモリ: （非 AI 端末での代替確認） |
+| 3 MLX Qwen2.5 1.5B | iPhone 15 (iPhone15,4) / 27.0.1 | 8 | **一部合格**（1 回目のみ） | 「私の名前はケイタ 覚えておいて」→ 72 秒後に `Tool.call save_note text=私の名前はケイタ。` → 承認（8.1 秒待ち）→ 保存、返答「メモを保存しました…」。合計 81.9 秒（preload を押さずに送信したので、初回のダウンロード・読み込みを含む見込み。内訳は未計測）。メモリ: MLX active 831 MB / 利用可能 2126 MB（Phase 2-0 と同じ 831 MB）。拒否・2 回目以降の所要時間は未実施。ACq8LAUouAjz |
 | 4 複数ターン | | | 未実施 | |
 | 4 キャンセル | | | 未実施 | |
 | 5 App Attest | iPhone 15 / | | 後回し | API 契約なし |
