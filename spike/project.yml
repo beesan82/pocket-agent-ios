@@ -39,6 +39,8 @@ targets:
     platform: iOS
     sources:
       - FMHarness
+      # Pocket Agent's icon: App Store Connect rejects uploads without one (ITMS-90022 / 90713).
+      - path: ../App/PocketAgent/Assets.xcassets
     dependencies:
       - package: ClaudeForFoundationModels
         product: ClaudeForFoundationModels
@@ -67,6 +69,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Codemagic adds CODE_SIGN_ENTITLEMENTS: FMHarness/AppAttest.entitlements only when
         # SPIKE_APP_ATTEST=1 (the App ID needs the App Attest capability first).
 
