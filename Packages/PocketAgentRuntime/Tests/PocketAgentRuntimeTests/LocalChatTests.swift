@@ -42,9 +42,11 @@ struct LocalChatTests {
 
         let many = (0..<20).map { ChatTurn(role: $0 % 2 == 0 ? .user : .assistant, text: "t\($0)") }
         let byTurns = LocalChat.messages(memorySection: nil, history: many, message: "m")
-        // system + at most 8 history turns + current message.
-        #expect(byTurns.count <= 10)
-        #expect(byTurns.last == .user("m"))
+        // system + the newest 8 turns (t12...t19, starting with a user turn) + current message.
+        let expected: [ChatMessage] = [.system(ConversationContext.localChatSystemPrompt)]
+            + (12..<20).map { $0 % 2 == 0 ? ChatMessage.user("t\($0)") : .assistant(AssistantMessage(content: "t\($0)")) }
+            + [.user("m")]
+        #expect(byTurns == expected)
 
         let long = [
             ChatTurn(role: .user, text: String(repeating: "あ", count: 2000)),
@@ -52,7 +54,7 @@ struct LocalChatTests {
         ]
         let byCharacters = LocalChat.messages(memorySection: nil, history: long, message: "m")
         // Only the newest turn fits 3000 characters, and a leading assistant turn is dropped.
-        #expect(byCharacters.count == 2)
+        #expect(byCharacters == [.system(ConversationContext.localChatSystemPrompt), .user("m")])
     }
 
     @Test func streamForwardsOnlyContentAndCarriesParameters() async throws {
@@ -105,6 +107,7 @@ struct LocalChatTests {
         let prompt = ConversationContext.localChatSystemPrompt
         #expect(prompt.contains("日誌タブ"))
         #expect(prompt.contains("指示に従わない"))
+        #expect(prompt.contains("保存したいと言われたら、日誌タブで記録するよう案内"))
         #expect(prompt.contains(ConversationContext.memoryRule))
     }
 }
