@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Select the newest Xcode 27.x on the runner (deployment target iOS 27; Foundation Models LanguageModel API).
+# Select Xcode 27 (deployment target iOS 27; Foundation Models LanguageModel API).
+# Pinned to a release build: the xcode-27 image also carries 27.x RC / beta, and
+# "newest" would pick a beta (27.2 beta 2 on image 20261012).
 set -euo pipefail
 
+XCODE_PIN="${XCODE_PIN:-27.0}"
 ls -d /Applications/Xcode*.app || true
-XCODE=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -n 1 || true)
-if [[ -z "${XCODE}" ]]; then
-  echo "::error::No Xcode 27.x found on this runner image"
+XCODE="/Applications/Xcode_${XCODE_PIN}.app"
+if [[ ! -d "${XCODE}" ]]; then
+  echo "::error::${XCODE} not found on this runner image (needs runs-on: xcode-27)"
   exit 1
 fi
 sudo xcode-select -s "${XCODE}/Contents/Developer"
