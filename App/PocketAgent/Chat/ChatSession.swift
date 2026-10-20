@@ -30,6 +30,9 @@ final class ChatSession {
     private(set) var status = Status.idle
     /// The downloaded model's reply so far; never saved until the reply completes.
     private(set) var streamingText = ""
+    /// Why the last downloaded-model send could not run (typed, so the screen can offer the fix);
+    /// cleared by the next send.
+    private(set) var lastFailureReason: ModelUnavailableReason?
     /// A send is in progress (loading the model or answering).
     var isBusy: Bool { status == .running || status == .loadingModel }
     /// The Apple model kept failing to use the note tools in this conversation (requirements §6.4).
@@ -48,6 +51,9 @@ final class ChatSession {
     @ObservationIgnored private let approvalHandler: ToolApprovalGate.ApprovalHandler
     @ObservationIgnored private let log: @MainActor (String) -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// Identifies the current downloaded-model send: a stopped send may still be waiting for the
+    /// model to load and must not touch the state of a later one.
+    @ObservationIgnored private var localSendID = 0
     // Observed: `isToolSupportLimited` is derived from these.
     private var tracker = ToolCapabilityTracker()
     private var lastChoice: ModelChoice?
@@ -95,6 +101,7 @@ final class ChatSession {
     func send(_ text: String) {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, !isBusy else { return }
+        lastFailureReason = nil
 
         let choice = settings.choice
         // Capability evidence is per model: switching models starts over.
@@ -127,6 +134,11 @@ final class ChatSession {
 
     func stop() {
         task?.cancel()
+        // Loading the model cannot be cancelled: release the session now and let the
+        // late load completion be ignored.
+        if status == .loadingModel {
+            status = .failed(RunFailureText.stopped)
+        }
     }
 
     /// The models that run through `AgentRunner` with the note tools.
@@ -219,16 +231,20 @@ final class ChatSession {
     private func sendLocal(message: String, previousTurns: [ChatTurn]) {
         if let reason = localModel.reason(), reason != .modelLoading {
             // Never load a model that is not downloaded or was unloaded for memory.
-            status = .failed(reason.userMessage)
+            fail(with: reason)
             return
         }
         status = .loadingModel
         streamingText = ""
+        localSendID += 1
+        let sendID = localSendID
         let localModel = localModel
         task = Task {
             defer {
-                streamingText = ""
-                task = nil
+                if sendID == localSendID {
+                    streamingText = ""
+                    task = nil
+                }
             }
             // Memory is optional context. The section is not deducted from the history budget,
             // so it uses the small on-device limit.
@@ -236,11 +252,16 @@ final class ChatSession {
             let section = ConversationContext.memorySection(memory: memory, limit: .appleLocal)
             let client = await localModel.client()
             if Task.isCancelled {
-                status = .failed(RunFailureText.stopped)
+                // `stop()` already reported it; a later send may own the status by now.
+                if sendID == localSendID { status = .failed(RunFailureText.stopped) }
                 return
             }
             guard let client else {
-                status = .failed(localModel.reason()?.userMessage ?? MLXRuntime.loadFailedText)
+                if let reason = localModel.reason() {
+                    fail(with: reason)
+                } else {
+                    status = .failed(MLXRuntime.loadFailedText)
+                }
                 return
             }
             status = .running
@@ -253,13 +274,24 @@ final class ChatSession {
                 }
             } catch {
                 // Never show `error` itself: it may carry model output.
-                status = .failed(Task.isCancelled || error is CancellationError
-                    ? RunFailureText.stopped : LLMErrorDescriber.userMessage(for: error))
+                if Task.isCancelled || error is CancellationError {
+                    status = .failed(RunFailureText.stopped)
+                } else if localModel.reason() == .unloadedForMemory {
+                    fail(with: .unloadedForMemory)
+                } else {
+                    status = .failed(LLMErrorDescriber.userMessage(for: error))
+                }
                 return
             }
             // A cancelled consumer ends the stream without an error.
             if Task.isCancelled {
                 status = .failed(RunFailureText.stopped)
+                return
+            }
+            // A memory warning drops the client at once while the screen's stop() comes later,
+            // so the stream can end "normally" with a cut-off reply: never save it.
+            if localModel.reason() == .unloadedForMemory {
+                fail(with: .unloadedForMemory)
                 return
             }
             let turn = ChatTurn(role: .assistant, text: reply.isEmpty ? RunFailureText.emptyReply : reply)
@@ -272,6 +304,11 @@ final class ChatSession {
             turns.append(turn)
             status = .idle
         }
+    }
+
+    private func fail(with reason: ModelUnavailableReason) {
+        lastFailureReason = reason
+        status = .failed(reason.userMessage)
     }
 
     /// What `finish` needs to know about one send.

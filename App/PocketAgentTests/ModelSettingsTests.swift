@@ -39,6 +39,30 @@ struct ModelSettingsTests {
         #expect(ModelSettings(defaults: defaults).choice == .mlxLocal)
     }
 
+    // Nothing saved used to mean Claude (the old default): with a key, Claude is kept and saved.
+    @Test func migrationKeepsClaudeForUnsetChoiceWithKey() {
+        let defaults = makeDefaults()
+        let settings = ModelSettings(defaults: defaults)
+        let credentials = SpyCredentialStore(key: "test-key")
+
+        settings.migrateDefaultModelIfNeeded(credentials: credentials)
+
+        #expect(settings.choice == .claude)
+        #expect(defaults.string(forKey: "pocketagent.modelChoice") == "claude")
+        #expect(ModelSettings(defaults: defaults).choice == .claude)
+        #expect(credentials.reads == 1)
+    }
+
+    @Test func freshInstallLandsOnDownloadedModel() {
+        let defaults = makeDefaults()
+        let settings = ModelSettings(defaults: defaults)
+
+        settings.migrateDefaultModelIfNeeded(credentials: SpyCredentialStore(key: nil))
+
+        #expect(settings.choice == .mlxLocal)
+        #expect(ModelSettings(defaults: defaults).choice == .mlxLocal)
+    }
+
     @Test func migrationKeepsClaudeWithKey() {
         let defaults = makeDefaults()
         defaults.set("claude", forKey: "pocketagent.modelChoice")

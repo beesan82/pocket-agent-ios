@@ -32,21 +32,22 @@ final class ModelSettings {
         claudeModel = defaults.string(forKey: Key.claudeModel) ?? ClaudeAdapter.defaultModel
     }
 
-    /// Once per install: a saved Claude choice without a saved API key moves to the new default.
+    /// Once per install: a Claude choice, saved or implied by the old default (nothing saved),
+    /// stays on Claude only when an API key is saved; otherwise it moves to the new default.
     /// Only checks whether a key exists (never builds a client). A failed key read leaves the
     /// flag unset so the next launch tries again.
     func migrateDefaultModelIfNeeded(credentials: any CredentialStore) {
         guard !defaults.bool(forKey: Key.defaultModelMigrated) else { return }
-        if defaults.string(forKey: Key.choice) == ModelChoice.claude.rawValue {
+        let stored = defaults.string(forKey: Key.choice)
+        if stored == nil || stored == ModelChoice.claude.rawValue {
             let key: String?
             do {
                 key = try credentials.readAPIKey()
             } catch {
                 return
             }
-            if key?.isEmpty ?? true {
-                choice = Self.defaultChoice
-            }
+            // Assigned either way so the result is saved, not left to the default.
+            choice = (key?.isEmpty ?? true) ? Self.defaultChoice : .claude
         }
         defaults.set(true, forKey: Key.defaultModelMigrated)
     }

@@ -12,21 +12,22 @@ import Testing
 final class FakeLocalModel: LocalModelAccess {
     var currentReason: ModelUnavailableReason?
     private let loadedClient: (any LLMClient)?
-    private let holdsLoad: Bool
+    /// Whether the next `client()` call waits for `releaseLoad()`.
+    var holdsLoadForNextCall: Bool
     private var loadWaiter: CheckedContinuation<Void, Never>?
     private(set) var clientCalls = 0
 
     init(reason: ModelUnavailableReason? = nil, client: (any LLMClient)? = nil, holdsLoad: Bool = false) {
         currentReason = reason
         loadedClient = client
-        self.holdsLoad = holdsLoad
+        holdsLoadForNextCall = holdsLoad
     }
 
     func reason() -> ModelUnavailableReason? { currentReason }
 
     func client() async -> (any LLMClient)? {
         clientCalls += 1
-        if holdsLoad {
+        if holdsLoadForNextCall {
             await withCheckedContinuation { loadWaiter = $0 }
         }
         return loadedClient
@@ -225,6 +226,97 @@ struct ChatSessionLocalTests {
         #expect(try await waitUntil { session.status == .failed(RunFailureText.stopped) })
         #expect(client.requests.isEmpty)
         #expect(repository.turns(of: conversation) == [ChatTurn(role: .user, text: "やあ")])
+    }
+
+    // Loading cannot be cancelled: stop frees the session at once and the late load is ignored.
+    @Test func stopDuringLoadReleasesBusyImmediately() async throws {
+        let conversation = try repository.create(choice: .mlxLocal)
+        let client = GatedStreamClient()
+        let local = FakeLocalModel(reason: .modelLoading, client: client, holdsLoad: true)
+        let session = makeSession(conversation, localModel: local)
+
+        session.send("やあ")
+        #expect(try await waitUntil { local.clientCalls == 1 })
+        session.stop()
+
+        #expect(session.status == .failed(RunFailureText.stopped))
+        #expect(!session.isBusy)
+
+        local.releaseLoad()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(session.status == .failed(RunFailureText.stopped))
+        #expect(client.requests.isEmpty)
+        #expect(repository.turns(of: conversation) == [ChatTurn(role: .user, text: "やあ")])
+    }
+
+    // A send after a stop during loading is not disturbed by the stopped send's late completion.
+    @Test func sendAfterStoppedLoadIsNotDisturbed() async throws {
+        let conversation = try repository.create(choice: .mlxLocal)
+        let client = GatedStreamClient()
+        let slow = FakeLocalModel(reason: .modelLoading, client: client, holdsLoad: true)
+        let session = makeSession(conversation, localModel: slow)
+
+        session.send("一つ目")
+        #expect(try await waitUntil { slow.clientCalls == 1 })
+        session.stop()
+        slow.currentReason = nil
+        slow.holdsLoadForNextCall = false
+
+        session.send("二つ目")
+        #expect(try await waitUntil { client.requests.count == 1 })
+        client.yield("途中")
+        #expect(try await waitUntil { session.streamingText == "途中" })
+        // The first send's load finishes late: it must not touch the second send.
+        slow.releaseLoad()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(session.status == .running)
+        #expect(session.streamingText == "途中")
+
+        client.finish()
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 3 })
+        #expect(session.turns.last == ChatTurn(role: .assistant, text: "途中"))
+        #expect(client.requests.count == 1)
+    }
+
+    // A memory warning drops the client before the screen calls stop(): the stream may end
+    // normally, but the cut-off reply is never saved.
+    @Test func unloadDuringStreamDoesNotSavePartial() async throws {
+        let conversation = try repository.create(choice: .mlxLocal)
+        let client = GatedStreamClient()
+        let local = FakeLocalModel(client: client)
+        let session = makeSession(conversation, localModel: local)
+
+        session.send("長い話をして")
+        #expect(try await waitUntil { client.requests.count == 1 })
+        client.yield("むかしむかし")
+        #expect(try await waitUntil { session.streamingText == "むかしむかし" })
+        local.currentReason = .unloadedForMemory
+        client.finish()
+
+        #expect(try await waitUntil { !session.isBusy })
+        #expect(session.status == .failed(ModelUnavailableReason.unloadedForMemory.userMessage))
+        #expect(session.lastFailureReason == .unloadedForMemory)
+        #expect(session.streamingText == "")
+        #expect(repository.turns(of: conversation) == [ChatTurn(role: .user, text: "長い話をして")])
+    }
+
+    @Test func notDownloadedSetsTypedReason() async throws {
+        let conversation = try repository.create(choice: .mlxLocal)
+        let client = GatedStreamClient()
+        let local = FakeLocalModel(reason: .modelNotDownloaded, client: client)
+        let session = makeSession(conversation, localModel: local)
+
+        session.send("やあ")
+        #expect(session.lastFailureReason == .modelNotDownloaded)
+
+        // The next send clears it.
+        local.currentReason = nil
+        session.send("もう一度")
+        #expect(session.lastFailureReason == nil)
+        #expect(try await waitUntil { client.requests.count == 1 })
+        client.finish()
+        #expect(try await waitUntil { session.status == .idle })
+        #expect(session.lastFailureReason == nil)
     }
 
     @Test(arguments: [ModelUnavailableReason.modelNotDownloaded, .unloadedForMemory, .simulatorUnsupported])
