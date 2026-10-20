@@ -40,8 +40,11 @@ final class ApprovalCenter {
 
     private(set) var request: Request?
     private var continuation: CheckedContinuation<Bool, Never>?
+    /// Experiments only: approve without showing the sheet (logged by the tool).
+    var autoApprove = false
 
     func ask(toolName: String, summary: String) async -> Bool {
+        if autoApprove { return true }
         guard continuation == nil else { return false }  // one approval at a time
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in

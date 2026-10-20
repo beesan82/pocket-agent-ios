@@ -20,6 +20,9 @@ struct SpikeView: View {
     @State private var running: Task<Void, Never>?
     @State private var apiKeyInput = ""
     @AppStorage("spike.clientID") private var clientID = ""
+    @State private var sampling: Sampling = .providerDefault
+    @State private var experiment: Experiment = .afterTool
+    @State private var trials = 5
 
     var body: some View {
         NavigationStack {
@@ -63,6 +66,17 @@ struct SpikeView: View {
                         Button("キャンセル", role: .destructive) { running?.cancel() }
                             .disabled(running == nil)
                     }
+                }
+                Section("実験（2ターン目の切り分け）") {
+                    Picker("生成設定（送信にも適用）", selection: $sampling) {
+                        ForEach(Sampling.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    Picker("実験", selection: $experiment) {
+                        ForEach(Experiment.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    Stepper("回数: \(trials)", value: $trials, in: 1...10)
+                    Button("実験を実行（自動承認・毎回新しいセッション）") { startExperiment() }
+                        .disabled(running != nil)
                 }
                 Section("保存されたメモ (\(notes.notes.count))") {
                     ForEach(notes.notes, id: \.self) { Text($0) }
@@ -116,7 +130,7 @@ struct SpikeView: View {
         running = Task {
             let started = Date()
             do {
-                let response = try await session.respond(to: text)
+                let response = try await session.respond(to: text, options: sampling.options)
                 log.add("← \(response.content)")
             } catch is CancellationError {
                 log.add("respond threw CancellationError")
@@ -125,6 +139,20 @@ struct SpikeView: View {
             }
             log.add(String(format: "elapsed %.1fs, isResponding=%@, %@", Date().timeIntervalSince(started),
                            String(session.isResponding), transcriptSummary(session)))
+            if backend == .mlx { log.add(Probes.memorySummary()) }
+            running = nil
+        }
+    }
+
+    private func startExperiment() {
+        let (experiment, sampling, trials, backend) = (experiment, sampling, trials, backend)
+        running = Task {
+            approvals.autoApprove = true
+            await runExperiment(
+                experiment, sampling: sampling, trials: trials, backend: backend,
+                makeTools: { [SaveNoteTool(approvals: approvals, notes: notes, log: log)] },
+                clientID: clientID, log: log)
+            approvals.autoApprove = false
             if backend == .mlx { log.add(Probes.memorySummary()) }
             running = nil
         }
