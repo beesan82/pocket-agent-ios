@@ -14,6 +14,7 @@ struct AskJournalView: View {
     @State private var question = ""
     @State private var preparing = false
     @State private var prepareTask: Task<Void, Never>?
+    @FocusState private var inputFocused: Bool
 
     init(
         journal: any JournalStore, mlxStore: MLXModelStore, mlxRuntime: MLXRuntime,
@@ -36,8 +37,13 @@ struct AskJournalView: View {
     var body: some View {
         Form {
             Section {
-                TextField("例: 先週なにしてた？", text: $question, axis: .vertical)
-                    .lineLimit(1...4)
+                TextField("例: 先週なにしてた？", text: $question)
+                    .focused($inputFocused)
+                    .submitLabel(.search)
+                    .onSubmit {
+                        if canAsk { ask() }
+                        inputFocused = false
+                    }
                     .disabled(isBusy)
                 if isBusy {
                     Button("停止", role: .destructive) { stop() }
@@ -75,7 +81,12 @@ struct AskJournalView: View {
             }
         }
         .navigationTitle("日誌に聞く")
+        .scrollDismissesKeyboard(.interactively)
         .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完了") { inputFocused = false }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     settingsView
@@ -117,6 +128,7 @@ struct AskJournalView: View {
     }
 
     private func ask() {
+        inputFocused = false
         let text = question
         prepareTask?.cancel()
         preparing = true

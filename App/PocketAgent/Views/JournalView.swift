@@ -21,6 +21,7 @@ struct JournalView: View {
     @State private var confirmInstall = false
     @State private var capture: CaptureRequest?
     @State private var reloadToken = 0
+    @FocusState private var inputFocused: Bool
 
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -53,7 +54,12 @@ struct JournalView: View {
         }
         .navigationTitle("日誌")
         .searchable(text: $query, prompt: "日誌を検索")
+        .scrollDismissesKeyboard(.interactively)
         .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完了") { inputFocused = false }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     settingsView
@@ -187,6 +193,7 @@ struct JournalView: View {
                 recordButton
                 TextField("テキストで記録", text: $input, axis: .vertical)
                     .lineLimit(1...4)
+                    .focused($inputFocused)
                     .textFieldStyle(.roundedBorder)
                     .disabled(isRecordingBusy)
                 Button("記録") { recordText() }
@@ -221,12 +228,14 @@ struct JournalView: View {
     }
 
     private func recordText() {
+        inputFocused = false
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         capture = CaptureRequest(source: .text, transcript: text)
     }
 
     private func startRecording() {
+        inputFocused = false
         speechMessage = nil
         Task {
             do {
