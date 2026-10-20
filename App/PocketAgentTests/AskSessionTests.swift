@@ -40,4 +40,10 @@ struct AskSessionTests {
         #expect(session.answer == "途中まで")
         #expect(probe.terminated)
     }
+
+    @Test func journalCalendarStartsWeeksOnMonday() {
+        let calendar = JournalModelAccess.journalCalendar
+        #expect(calendar.firstWeekday == 2)
+        #expect(calendar.timeZone == .current)
+    }
 }

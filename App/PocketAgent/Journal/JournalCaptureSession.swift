@@ -44,15 +44,17 @@ final class JournalCaptureSession {
     }
 
     /// Starts the summary when the text is long enough and the model is ready (once per capture).
-    func beginIfNeeded() {
-        guard phase == .editing, !hasSummary, summaryTask == nil, assistant != nil else { return }
+    /// Never starts while the app is not in the foreground (GPU work in the background is refused).
+    func beginIfNeeded(isForeground: Bool = true) {
+        guard isForeground, phase == .editing, !hasSummary, summaryTask == nil, assistant != nil else { return }
         let input = trimmedTranscript
         guard SummaryPolicy.shouldSummarize(text: input, modelReady: modelReady) else { return }
         startSummary(input)
     }
 
     /// The user's 「要約する」: any non-empty text, also to re-run a summary. Needs a ready model.
-    func summarize() {
+    func summarize(isForeground: Bool = true) {
+        guard isForeground else { return }
         switch phase {
         case .summarizing, .saving, .saved: return
         case .editing, .summarized, .failed: break

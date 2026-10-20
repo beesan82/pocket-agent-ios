@@ -3,11 +3,12 @@ import Foundation
 /// Maps a relative-date word in a question to a date range.
 public enum RelativeDateRange {
     private enum Word: CaseIterable {
-        case today, yesterday, thisWeek, lastWeek, thisMonth, lastMonth
+        case today, dayBeforeYesterday, yesterday, thisWeek, lastWeek, thisMonth, lastMonth
 
         var text: String {
             switch self {
             case .today: "今日"
+            case .dayBeforeYesterday: "一昨日"
             case .yesterday: "昨日"
             case .thisWeek: "今週"
             case .lastWeek: "先週"
@@ -17,7 +18,7 @@ public enum RelativeDateRange {
         }
     }
 
-    /// The word that occurs earliest in the question wins.
+    /// The word that occurs earliest in the question wins, so 一昨日 beats the 昨日 inside it.
     public static func parse(_ question: String, now: Date, calendar: Calendar) -> DateInterval? {
         var best: (word: Word, index: String.Index)?
         for word in Word.allCases {
@@ -31,6 +32,8 @@ public enum RelativeDateRange {
         switch word {
         case .today:
             return day(containing: now, offset: 0, calendar: calendar)
+        case .dayBeforeYesterday:
+            return day(containing: now, offset: -2, calendar: calendar)
         case .yesterday:
             return day(containing: now, offset: -1, calendar: calendar)
         case .thisWeek:

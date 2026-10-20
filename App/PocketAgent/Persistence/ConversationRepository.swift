@@ -78,8 +78,8 @@ final class ConversationRepository {
 }
 
 enum DataReset {
-    /// Erases conversations, the journal (notes included), the API key and the GitHub token. Every step is attempted;
-    /// the first error is thrown afterwards.
+    /// Erases conversations, the journal (notes included), notes left over from before the journal, the API key
+    /// and the GitHub token. Every step is attempted; the first error is thrown afterwards.
     @MainActor
     static func eraseAll(
         context: ModelContext, journal: any JournalStore, credentials: any CredentialStore,
@@ -88,6 +88,10 @@ enum DataReset {
         var firstError: Error?
         do { try ConversationRepository(context: context).deleteAll() } catch { firstError = firstError ?? error }
         do { try await journal.deleteAll() } catch { firstError = firstError ?? error }
+        do {
+            try context.delete(model: NoteRecord.self)
+            try context.save()
+        } catch { firstError = firstError ?? error }
         do { try credentials.deleteAPIKey() } catch { firstError = firstError ?? error }
         do { try githubToken.deleteAPIKey() } catch { firstError = firstError ?? error }
         if let firstError { throw firstError }

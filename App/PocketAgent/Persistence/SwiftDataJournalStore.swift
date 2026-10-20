@@ -24,7 +24,7 @@ actor SwiftDataJournalStore: JournalStore {
 
     /// Filters with `NoteSearch.matches` so results match the in-memory store exactly.
     func search(_ query: String) async throws -> [JournalEntry] {
-        try await all().filter { NoteSearch.matches($0.body + "\n" + ($0.title ?? ""), query: query) }
+        try await all().filter { NoteSearch.matches($0.body + "\n" + ($0.title ?? "") + "\n" + ($0.transcript ?? ""), query: query) }
     }
 
     func entries(in interval: DateInterval) async throws -> [JournalEntry] {

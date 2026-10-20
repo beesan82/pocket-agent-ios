@@ -90,7 +90,7 @@ public actor InMemoryJournalStore: JournalStore {
 
     public func search(_ query: String) async throws -> [JournalEntry] {
         newestFirst(stored.filter {
-            NoteSearch.matches($0.body + "\n" + ($0.title ?? ""), query: query)
+            NoteSearch.matches($0.body + "\n" + ($0.title ?? "") + "\n" + ($0.transcript ?? ""), query: query)
         })
     }
 

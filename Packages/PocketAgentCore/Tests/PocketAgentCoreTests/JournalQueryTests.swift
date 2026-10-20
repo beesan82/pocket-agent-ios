@@ -38,6 +38,10 @@ struct JournalQueryTests {
         #expect(range("昨日何した") == DateInterval(start: date(2026, 10, 17), end: date(2026, 10, 18)))
     }
 
+    @Test func dayBeforeYesterdayIsNotYesterday() {
+        #expect(range("一昨日何した") == DateInterval(start: date(2026, 10, 16), end: date(2026, 10, 17)))
+    }
+
     @Test func thisWeekStartsOnMonday() {
         #expect(range("今週の予定") == DateInterval(start: date(2026, 10, 12), end: date(2026, 10, 19)))
     }

@@ -79,6 +79,14 @@ struct JournalStoreTests {
         #expect(try await store.search("").count == 2)
     }
 
+    @Test func searchFindsWordsOnlyInTranscript() async throws {
+        let store = makeStore()
+        let summarized = try await store.add(NewJournalEntry(
+            source: .voice, origin: .journal, body: "散歩した", transcript: "公園でコーヒーを飲んだ", title: "朝"))
+        _ = try await store.add(new("会議"))
+        #expect(try await store.search("コーヒー").map(\.id) == [summarized.id])
+    }
+
     @Test func deleteAndDeleteAll() async throws {
         let store = makeStore()
         let a = try await store.add(new("a"))
