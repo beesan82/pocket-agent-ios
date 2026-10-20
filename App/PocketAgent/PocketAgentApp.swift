@@ -11,7 +11,9 @@ struct PocketAgentApp: App {
     @State private var journal: SwiftDataJournalStore?
     private let credentials: KeychainCredentialStore
     private let availability = AppleLocalAvailability()
-    private let measurementLog = MeasurementLog()
+    private let measurementLog: MeasurementLog
+    /// The one download flow: both the settings list and the detailed models screen drive it.
+    @State private var downloadFlow: ModelDownloadFlow
     @State private var developer = DeveloperSettings()
     private let tokenStore = KeychainCredentialStore(
         service: "com.beesan82.pocketagent.github", account: "measurement-token")
@@ -28,6 +30,9 @@ struct PocketAgentApp: App {
         let store = MLXModelStore()
         _mlxStore = State(initialValue: store)
         _mlxRuntime = State(initialValue: MLXRuntime(store: store))
+        let log = MeasurementLog()
+        measurementLog = log
+        _downloadFlow = State(initialValue: ModelDownloadFlow(store: store, measurementLog: log))
 
         let container = try? AppModelContainer.make()
         if let container {
@@ -46,6 +51,11 @@ struct PocketAgentApp: App {
                     mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
                     developer: developer, tokenStore: tokenStore, journal: journal)
                     .modelContainer(container)
+                    .environment(downloadFlow)
+                    // Logged once here, not per screen (Settings and the models screen share the flow).
+                    .onChange(of: downloadFlow.statusSnapshot) { old, new in
+                        downloadFlow.logDownloadTransitions(from: old, to: new)
+                    }
             } else {
                 // Fixed text: the underlying error is never shown.
                 ContentUnavailableView(

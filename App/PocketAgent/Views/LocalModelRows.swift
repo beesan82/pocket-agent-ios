@@ -185,7 +185,6 @@ private struct ModelDownloadDialogs: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: flow.statusSnapshot) { old, new in flow.logDownloadTransitions(from: old, to: new) }
             .confirmationDialog(
                 "ダウンロードしますか？",
                 isPresented: Binding(

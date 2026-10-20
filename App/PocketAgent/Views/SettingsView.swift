@@ -24,24 +24,7 @@ struct SettingsView: View {
     @State private var hasToken = false
     @State private var tokenStatus: String?
     @State private var appleReason: ModelUnavailableReason?
-    @State private var downloadFlow: ModelDownloadFlow
-
-    init(
-        settings: ModelSettings, credentials: any CredentialStore, availability: any ModelAvailabilityChecking,
-        mlxStore: MLXModelStore, mlxRuntime: MLXRuntime, measurementLog: MeasurementLog,
-        developer: DeveloperSettings, tokenStore: any CredentialStore, journal: any JournalStore
-    ) {
-        self.settings = settings
-        self.credentials = credentials
-        self.availability = availability
-        self.mlxStore = mlxStore
-        self.mlxRuntime = mlxRuntime
-        self.measurementLog = measurementLog
-        self.developer = developer
-        self.tokenStore = tokenStore
-        self.journal = journal
-        _downloadFlow = State(initialValue: ModelDownloadFlow(store: mlxStore, measurementLog: measurementLog))
-    }
+    @Environment(ModelDownloadFlow.self) private var downloadFlow
 
     var body: some View {
         Form {

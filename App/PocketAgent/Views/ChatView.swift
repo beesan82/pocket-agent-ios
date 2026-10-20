@@ -43,7 +43,10 @@ struct ChatView: View {
                 localModel: MLXLocalModelAccess(store: mlxStore, runtime: mlxRuntime),
                 log: { measurementLog.append($0) })
         }
-        .stopsJournalGeneration(runtime: mlxRuntime, stop: { session?.stop() })
+        .stopsJournalGeneration(runtime: mlxRuntime, stop: {
+            // Only the downloaded model is affected by an MLX unload or backgrounding.
+            if settings.choice == .mlxLocal { session?.stop() }
+        })
         .onDisappear { session?.stop() }
     }
 }

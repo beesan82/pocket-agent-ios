@@ -7,13 +7,7 @@ struct MLXModelsView: View {
     let store: MLXModelStore
     let measurementLog: MeasurementLog
 
-    @State private var flow: ModelDownloadFlow
-
-    init(store: MLXModelStore, measurementLog: MeasurementLog) {
-        self.store = store
-        self.measurementLog = measurementLog
-        _flow = State(initialValue: ModelDownloadFlow(store: store, measurementLog: measurementLog))
-    }
+    @Environment(ModelDownloadFlow.self) private var flow
 
     var body: some View {
         List {
