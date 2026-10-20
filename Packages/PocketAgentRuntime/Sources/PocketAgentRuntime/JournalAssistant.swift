@@ -39,7 +39,9 @@ public struct JournalAssistant: JournalAssisting {
     public func summarize(_ text: String) -> AsyncThrowingStream<String, Error> {
         let messages: [ChatMessage] = [
             .system(JournalPrompts.summarySystem),
-            .user(JournalPrompts.summaryUser(text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
+            .user(JournalPrompts.summaryUser(
+                text: text.trimmingCharacters(in: .whitespacesAndNewlines), recordedAt: now(), calendar: calendar
+            ))
         ]
         return Self.contentOnly(client.stream(messages: messages, tools: [], requestContext: Self.context(maxTokens: 512)))
     }
@@ -76,7 +78,7 @@ public struct JournalAssistant: JournalAssisting {
             .system(JournalPrompts.answerSystem),
             .user(JournalPrompts.answerUser(
                 question: question, packed: packed, usedRecentFallback: selection.usedRecentFallback,
-                calendar: calendar
+                now: now(), calendar: calendar
             ))
         ]
         let answer = Self.contentOnly(

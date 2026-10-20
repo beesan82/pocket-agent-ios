@@ -11,7 +11,7 @@ public enum JournalPrompts {
     - それ以外の説明や前置きは書かない。
     """
 
-    public static func summaryUser(text: String) -> String {
+    public static func summaryUser(text: String, recordedAt: Date, calendar: Calendar = .current) -> String {
         "次の文章を要約してください。\n\n\(text)"
     }
 
@@ -33,7 +33,7 @@ public enum JournalPrompts {
     """
 
     public static func answerUser(
-        question: String, packed: [PackedEntry], usedRecentFallback: Bool, calendar: Calendar = .current
+        question: String, packed: [PackedEntry], usedRecentFallback: Bool, now: Date, calendar: Calendar = .current
     ) -> String {
         let formatter = dayFormatter(calendar)
         var lines: [String] = []

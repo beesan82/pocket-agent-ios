@@ -100,7 +100,7 @@ struct JournalAssistantTests {
         #expect(calls.last?.messages == [
             .system(JournalPrompts.answerSystem),
             .user(JournalPrompts.answerUser(
-                question: question, packed: result.evidence, usedRecentFallback: false, calendar: tokyo
+                question: question, packed: result.evidence, usedRecentFallback: false, now: fixedNow, calendar: tokyo
             ))
         ])
         #expect(JournalPrompts.termsSystem.contains("JSON"))
@@ -140,8 +140,8 @@ struct JournalAssistantTests {
             #expect(result.usedRecentFallback == false)
             let prompt = userText(client.calls.last)
             // 08:00 JST on the 14th is still the 13th in UTC: dates must use the calendar's zone.
-            #expect(prompt.contains("--- 日誌 (2026-10-14) ---\n朝に散歩した"))
-            #expect(prompt.contains("--- 日誌 (2026-10-13) ---\n仕事が忙しかった"))
+            #expect(prompt.contains("--- 日誌 (2026-10-14 08:00) ---\n朝に散歩した"))
+            #expect(prompt.contains("--- 日誌 (2026-10-13 12:00) ---\n仕事が忙しかった"))
             #expect(!prompt.contains("2026-10-05"))
             #expect(!prompt.contains("今日のこと"))
         }
@@ -203,10 +203,10 @@ struct JournalAssistantTests {
         #expect(chunks == ["見出し: 歯医者\n", "歯医者に行った。"])
         #expect(client.calls.map(\.kind) == [.stream])
         #expect(client.calls.first?.messages == [
-            .system(JournalPrompts.summarySystem), .user(JournalPrompts.summaryUser(text: "歯医者に行った"))
+            .system(JournalPrompts.summarySystem), .user(JournalPrompts.summaryUser(text: "歯医者に行った", recordedAt: fixedNow, calendar: tokyo))
         ])
         #expect(JournalPrompts.summarySystem.contains("見出し"))
-        #expect(JournalPrompts.summaryUser(text: "歯医者に行った").contains("歯医者に行った"))
+        #expect(JournalPrompts.summaryUser(text: "歯医者に行った", recordedAt: fixedNow, calendar: tokyo).contains("歯医者に行った"))
     }
 
     @Test func summaryErrorPropagates() async throws {
@@ -269,5 +269,36 @@ struct JournalAssistantTests {
         let calls = client.calls
         #expect(calls.map(\.kind) == [.stream, .generate, .stream])
         #expect(calls.map(\.extraFields) == [limits(512), limits(64), limits(384)])
+    }
+
+    @Test func summaryPromptCarriesRecordTimeAndWeekday() async throws {
+        let now = tokyo.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 23, minute: 9))!
+        let client = ScriptedTextClient(stream: [.deltas([.content("見出し: 夜
+要約")])])
+        let assistant = JournalAssistant(client: client, now: { now }, calendar: tokyo)
+
+        _ = try await collect(assistant.summarize("歯医者に行った"))
+
+        let prompt = userText(client.calls.last)
+        #expect(prompt.hasPrefix("記録日時: 2026-10-20 23:09（月）
+"))
+        #expect(prompt.contains("歯医者に行った"))
+        #expect(JournalPrompts.summarySystem.contains("午前・午後を推測で決めない"))
+    }
+
+    @Test func answerPromptCarriesCurrentTimeAndEntryTimes() async throws {
+        let now = tokyo.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 23, minute: 9))!
+        let client = ScriptedTextClient(generate: [.reply(#"["散歩"]"#)], stream: [answered])
+        let entryAt = tokyo.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 8, minute: 5))!
+        let (store, _) = try await makeStore([(entryAt, "散歩した")])
+        let assistant = JournalAssistant(client: client, now: { now }, calendar: tokyo)
+
+        _ = try await assistant.ask("散歩は？", store: store)
+
+        let prompt = userText(client.calls.last)
+        #expect(prompt.hasPrefix("現在日時: 2026-10-20 23:09（火）
+"))
+        #expect(prompt.contains("--- 日誌 (2026-10-20 08:05) ---
+散歩した"))
     }
 }
