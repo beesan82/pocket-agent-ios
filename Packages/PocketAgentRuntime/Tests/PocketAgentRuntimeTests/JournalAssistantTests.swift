@@ -280,7 +280,7 @@ struct JournalAssistantTests {
         _ = try await collect(assistant.summarize("歯医者に行った"))
 
         let prompt = userText(client.calls.last)
-        #expect(prompt.hasPrefix("記録日時: 2026-10-20 23:09（月）\n"))
+        #expect(prompt.hasPrefix("記録日時: 2026-10-20 23:09（火）\n"))
         #expect(prompt.contains("歯医者に行った"))
         #expect(JournalPrompts.summarySystem.contains("午前・午後を推測で決めない"))
     }
