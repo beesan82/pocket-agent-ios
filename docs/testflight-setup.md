@@ -35,7 +35,7 @@ Codemagic の `ios_signing` は、事前に登録された証明書とプロフ�
 ## 4.6 Metal Toolchain（Phase 2 以降、MLX を含むビルドに必須）
 Xcode 26 では Metal コンパイラが別コンポーネントになり、Codemagic のイメージには入っていない。MLX の `.metal` ファイルのコンパイルで
 「cannot execute tool 'metal' due to missing Metal Toolchain」と失敗する（2026-10-19 に発生）。`codemagic.yaml` の先頭ステップで
-`xcodebuild -downloadComponent MetalToolchain` を実行して取得する（毎ビルド数分かかる）。GitHub Actions の macos-26 イメージには同梱済み。
+`xcodebuild -downloadComponent MetalToolchain` を実行して取得する（毎ビルド数分かかる）。GitHub Actions の macos-26 イメージには同梱済みだったが、xcode-27 イメージには無いため CI でも取得する（ADR-030）。
 
 ## 5. ビルドを実行する
 1. Codemagic → Pocket Agent → Start new build → ブランチ `main` / ワークフロー **iOS TestFlight**。

@@ -54,7 +54,7 @@ v6.1.0 のソースで確認した公開 API（Adapter 実装時の出発点。�
 ```text
 Windows (Claude Code) ── git push ──▶ GitHub
                                       │
-                                      ├─ GitHub Actions (macos-26)
+                                      ├─ GitHub Actions (xcode-27, Xcode 27.0)
                                       │    1. secret scan (AT-11 の最小版)
                                       │    2. swift test  Packages/PocketAgentCore
                                       │    3. xcodegen generate

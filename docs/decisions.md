@@ -155,6 +155,13 @@
 - 影響要件: FR-05, Phase 2
 - 状態: 採用（実機未検証）
 
+## ADR-030 対応 OS を iOS 27 に上げ、CI を Xcode 27.0（GitHub `xcode-27` ランナー）にする
+- 決定: deploymentTarget を iOS 27.0 にする。GitHub Actions は `runs-on: xcode-27`（public preview）で、`ci/select-xcode.sh` が `Xcode_27.0.app` を選ぶ（`XCODE_PIN` で変更可）。同イメージは Metal Toolchain を同梱しないため（actions/runner-images#14548）、CI でも `xcodebuild -downloadComponent MetalToolchain` を実行する。
+- 理由: Foundation Models の `LanguageModel` 差し替え（第2段階スパイク）が iOS 27 SDK を要する。ユーザーは iOS 27 への引き上げと iPhone 15 の更新を了承済み（2026-10-19）。macos-26 ランナーには Xcode 26.0〜26.6 しか無い（run 39434491253 で確認）。「最新」を選ぶと 27.2 beta が選ばれるため、リリース版の 27.0 に固定した。
+- 検証: AgentRunKit 6.1.0・mlx-swift 0.30.6・mlx-swift-lm 2.30.6 が Xcode 27 でビルドでき、Core / Runtime / アプリのテストが iOS 27.0 シミュレータで合格（run 39434966799 は Xcode 27.2 beta、run 39437405259 は Xcode 27.0）。
+- 影響要件: 6.1（対応 OS）、FR-13, Phase 2
+- 状態: 採用（Codemagic の `xcode: latest` が Xcode 27 かどうか、iOS 27 下限のビルドが TestFlight で動くかは未検証）
+
 ## 未決定
 - 永続化: SwiftData を Phase 1 で採用（設計書）。
 - Bundle ID: `com.beesan82.pocketagent`（2026-10-18 決定、ユーザー承認）。Team ID はリポジトリに書かず、Codemagic の自動署名がプロファイルから設定する。

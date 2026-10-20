@@ -2,7 +2,7 @@ name: PocketAgent
 options:
   bundleIdPrefix: com.beesan82
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "27.0"
   createIntermediateGroups: true
 settings:
   base:

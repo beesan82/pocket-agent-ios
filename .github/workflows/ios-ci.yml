@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -35,8 +35,12 @@ jobs:
       - name: Secret scan (AT-11, minimal)
         run: bash ci/secret-scan.sh
 
-      - name: Select Xcode 26.x
+      - name: Select Xcode 27.x
         run: bash ci/select-xcode.sh
+
+      # xcode-27 image lacks the Metal Toolchain (actions/runner-images#14548); MLX compiles .metal files.
+      - name: Install Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
 
       - name: Core package tests
         working-directory: Packages/PocketAgentCore
