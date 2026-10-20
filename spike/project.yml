@@ -1,0 +1,77 @@
+# THROWAWAY spike (design 2026-10-19 "第2段階の入口"). Lives only on spike/fm-harness; never merge to main.
+# Separate project because mlx-swift-lm 3.32.x (MLXFoundationModels) cannot coexist with
+# AgentRunKit 6.1.0, which pins mlx-swift-lm .upToNextMinor(from: "2.30.0").
+name: FMHarness
+options:
+  bundleIdPrefix: com.beesan82
+  deploymentTarget:
+    iOS: "27.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    VERSIONING_SYSTEM: apple-generic
+    DEVELOPMENT_TEAM: ""
+
+packages:
+  ClaudeForFoundationModels:
+    url: https://github.com/anthropics/ClaudeForFoundationModels.git
+    exactVersion: 0.2.3
+  mlx-swift-lm:
+    url: https://github.com/ml-explore/mlx-swift-lm
+    exactVersion: 3.32.3
+  MLX:
+    url: https://github.com/ml-explore/mlx-swift
+    minorVersion: 0.32.3
+  swift-huggingface:
+    url: https://github.com/huggingface/swift-huggingface
+    from: 0.9.0
+  swift-transformers:
+    url: https://github.com/huggingface/swift-transformers
+    from: 1.3.0
+
+targets:
+  FMHarness:
+    type: application
+    platform: iOS
+    sources:
+      - FMHarness
+    dependencies:
+      - package: ClaudeForFoundationModels
+        product: ClaudeForFoundationModels
+      - package: mlx-swift-lm
+        product: MLXFoundationModels
+      - package: mlx-swift-lm
+        product: MLXHuggingFace
+      - package: mlx-swift-lm
+        product: MLXLLM
+      - package: mlx-swift-lm
+        product: MLXLMCommon
+      - package: MLX
+        product: MLX
+      - package: swift-huggingface
+        product: HuggingFace
+      - package: swift-transformers
+        product: Tokenizers
+    settings:
+      base:
+        # Same bundle ID as Pocket Agent: reuses its TestFlight record, signing profile and
+        # the Keychain item the app already holds (service com.beesan82.pocketagent.anthropic).
+        PRODUCT_BUNDLE_IDENTIFIER: com.beesan82.pocketagent
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: FM Spike
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        # Codemagic adds CODE_SIGN_ENTITLEMENTS: FMHarness/AppAttest.entitlements only when
+        # SPIKE_APP_ATTEST=1 (the App ID needs the App Attest capability first).
+
+schemes:
+  FMHarness:
+    build:
+      targets:
+        FMHarness: all

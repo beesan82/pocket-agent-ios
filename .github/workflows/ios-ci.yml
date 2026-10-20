@@ -116,3 +116,56 @@ jobs:
             build-device.log
             test.log
           if-no-files-found: ignore
+
+  # THROWAWAY: spike/fm-harness only (design 2026-10-19 "第2段階の入口"). Builds the separate
+  # FMHarness app (ClaudeForFoundationModels 0.2.3 + mlx-swift-lm 3.32.3 MLXFoundationModels).
+  spike-fm-harness:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: spike
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 27.x
+        working-directory: .
+        run: bash ci/select-xcode.sh
+
+      - name: Install Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Generate and resolve
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -resolvePackageDependencies -project FMHarness.xcodeproj -scheme FMHarness \
+            -skipMacroValidation -skipPackagePluginValidation
+          find . -name Package.resolved -not -path '*/.build/*' -exec cat {} \; || true
+
+      - name: Build (iOS Simulator, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build -project FMHarness.xcodeproj -scheme FMHarness \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO | tee spike-build.log
+
+      - name: Build (iOS device, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build -project FMHarness.xcodeproj -scheme FMHarness \
+            -destination 'generic/platform=iOS' \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO | tee spike-build-device.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-evidence
+          path: |
+            spike/**/Package.resolved
+            spike/spike-build.log
+            spike/spike-build-device.log
+          if-no-files-found: ignore
