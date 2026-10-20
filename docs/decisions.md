@@ -211,3 +211,11 @@
 - 理由: Windows のみの環境で実機の結果を回収するため。ログには文字起こし本文を入れず、件数などの測定値のみとする。
 - 影響要件: 要件の秘密情報の扱い（CLAUDE.md）、AT-11
 - 状態: 採用（実際の GitHub API に対する送信、トークン権限、private 判定は実機未検証。Issue 送信は成功の確認なし）
+
+## ADR-031 チャットのダウンロードモデル（`.mlxLocal`）はツールなしの会話のみ。既定モデルにする
+- 決定: `ModelChoice.mlxLocal` を追加し、設定を「クラウド（Claude）／ローカル（端末内: Apple・ダウンロードモデル）」の階層にまとめる。`.mlxLocal` のチャットは resolver と AgentRunner を通らず、`LocalChat` が MLX クライアントへ直接ストリームする（AgentRunKit 6.1.0 の `MLXClient` は `ContentOnlyTerminatingClient` ではないため）。ツール・ToolCapabilityTracker・救済・`toolcall.*` ログは使わない。保存を頼まれたら日誌タブを案内する。resolver は `.mlxLocal` を担当外として `.modelNotDownloaded` で安全側に失敗させ、キーを読まずクライアントも作らない。既定のチャットモデルは `.mlxLocal`（ユーザー判断、2026-10-21）。一度だけの移行で、保存済みの選択が Claude または未設定の場合、API キーがあれば Claude を保存して維持し、なければ `.mlxLocal` にする（フラグ `pocketagent.defaultModelMigrated`）。未ダウンロードなら理由と設定へのリンクを出し、自動ダウンロードはしない。
+- 停止・バックグラウンド・メモリ解放では途中の返答を保存しない。メモリ解放後のストリーム完了も保存しない（`reason() == .unloadedForMemory` で判定。1 回の返答中に解放→再読み込みされた場合は検出しない。発生しにくいので受け入れる）。ダウンロードの状態とダイアログはアプリで 1 つ（`ModelDownloadFlow`）を共有する。
+- 理由: Claude API を使わない利用者（iPhone 15、Apple Intelligence 非対応）がチャットを使えるようにする。ツール対応は FM ハーネスの第 2 段階で置き換える可能性がある。
+- 検証: Core `mlxLocalNeverReadsKeyOrBuildsClients`、Runtime `LocalChatTests`、App `ChatSessionLocalTests`（`mlxLocalNeverTouchesResolverOrKey`、`stopDoesNotSavePartial`、`unloadDuringStreamDoesNotSavePartial` ほか）、`ModelSettingsTests`（移行）。CI run 39476767480（App 148 件）。
+- 影響要件: FR-02, FR-03, AT-03, AT-14
+- 状態: 採用（設定の階層 UI、チャット往復、機内モード、停止、ダイアログ表示は実機未検証）
