@@ -138,6 +138,9 @@ final class ChatSession {
         // late load completion be ignored.
         if status == .loadingModel {
             status = .failed(RunFailureText.stopped)
+            // Retire the stopped send: its late completion must not touch whatever runs next
+            // (any model), including clearing that run's `task`.
+            localSendID += 1
         }
     }
 

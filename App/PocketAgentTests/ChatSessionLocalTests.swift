@@ -278,6 +278,33 @@ struct ChatSessionLocalTests {
         #expect(client.requests.count == 1)
     }
 
+    // The stopped send's late load must not clear the next (Claude) run's task: stop() still stops it.
+    @Test func claudeRunAfterStoppedLoadStaysStoppable() async throws {
+        let conversation = try repository.create(choice: .mlxLocal)
+        let slow = FakeLocalModel(reason: .modelLoading, client: GatedStreamClient(), holdsLoad: true)
+        let claude = FakeLLMClient([
+            .callTool(name: NoteToolName.save, arguments: #"{"text":"牛乳"}"#),
+            .finish("保存しました")
+        ])
+        let session = makeSession(conversation, localModel: slow, resolve: { _, _ in .success(claude) })
+
+        session.send("一つ目")
+        #expect(try await waitUntil { slow.clientCalls == 1 })
+        session.stop()
+
+        settings.choice = .claude
+        session.send("牛乳を覚えといて")
+        #expect(try await waitUntil { broker.pending != nil })
+        slow.releaseLoad()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(session.status == .running)
+
+        session.stop()
+        #expect(try await waitUntil { session.status == .failed(RunFailureText.stopped) })
+        #expect(broker.pending == nil)
+        #expect(try await notes.all().isEmpty)
+    }
+
     // A memory warning drops the client before the screen calls stop(): the stream may end
     // normally, but the cut-off reply is never saved.
     @Test func unloadDuringStreamDoesNotSavePartial() async throws {
