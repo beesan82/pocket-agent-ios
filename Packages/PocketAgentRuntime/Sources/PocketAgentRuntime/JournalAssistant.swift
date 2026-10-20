@@ -43,7 +43,7 @@ public struct JournalAssistant: JournalAssisting {
                 text: text.trimmingCharacters(in: .whitespacesAndNewlines), recordedAt: now(), calendar: calendar
             ))
         ]
-        return Self.contentOnly(client.stream(messages: messages, tools: [], requestContext: Self.context(maxTokens: 512)))
+        return StreamBridge.contentOnly(client.stream(messages: messages, tools: [], requestContext: LocalGeneration.requestContext(maxTokens: 512)))
     }
 
     public func ask(_ question: String, store: any JournalStore) async throws -> AskResult {
@@ -81,8 +81,8 @@ public struct JournalAssistant: JournalAssisting {
                 now: now(), calendar: calendar
             ))
         ]
-        let answer = Self.contentOnly(
-            client.stream(messages: messages, tools: [], requestContext: Self.context(maxTokens: 384))
+        let answer = StreamBridge.contentOnly(
+            client.stream(messages: messages, tools: [], requestContext: LocalGeneration.requestContext(maxTokens: 384))
         )
         return AskResult(evidence: packed, usedRecentFallback: selection.usedRecentFallback, answer: answer)
     }
@@ -93,39 +93,11 @@ public struct JournalAssistant: JournalAssisting {
             .system(JournalPrompts.termsSystem), .user(JournalPrompts.termsUser(question: question))
         ]
         if let reply = try? await client.generate(
-            messages: messages, tools: [], responseFormat: nil, requestContext: Self.context(maxTokens: 64)
+            messages: messages, tools: [], responseFormat: nil,
+            requestContext: LocalGeneration.requestContext(maxTokens: 64)
         ), let terms = SearchTerms.parse(llmOutput: reply.content), !terms.isEmpty {
             return terms
         }
         return SearchTerms.fallback(question: question)
-    }
-
-    static func context(maxTokens: Int) -> RequestContext {
-        RequestContext(extraFields: [
-            "temperature": .double(0.7),
-            "top_p": .double(0.8),
-            "max_tokens": .int(maxTokens),
-            "repetition_penalty": .double(1.1)
-        ])
-    }
-
-    /// Forwards `.content` text only. Ending the returned stream (e.g. cancelling its consumer)
-    /// cancels the pump, which ends iteration of `upstream` and so the model call.
-    static func contentOnly(_ upstream: AsyncThrowingStream<StreamDelta, Error>) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let pump = Task {
-                do {
-                    for try await delta in upstream {
-                        if case let .content(text) = delta {
-                            continuation.yield(text)
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in pump.cancel() }
-        }
     }
 }
