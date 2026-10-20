@@ -6,6 +6,10 @@
 ## 目的
 - 設計 docs/superpowers/specs/2026-10-19-agentic-tools-all-models-design.md の「第2段階の入口: スパイク定義」の項目 1〜5 を実機で確かめる。
 - 判断基準（設計書から）: **1・2・4 が通れば第2段階の設計へ進む。** 3 が通らなければ、ローカルは当面 AgentRunKit の `MLXClient` を残す「併用」設計。**1 が iPhone 15 で通らなければ第2段階は見送り。**
+- **2026-10-21 時点: Claude API の契約が無いため、項目 1・5（Claude 経路）は後回し**（ユーザー判断）。先に 2・3・4 を行う。
+  - 代わりに **項目 3 を iPhone 15 でも行う**。Apple Intelligence 非対応の端末でフレームワーク＋第三者 `LanguageModel`＋`Tool` が動くかを、Claude 抜きで先に確かめる（項目 1 の iPhone 15 の問いの一部）。
+  - 項目 4 は SystemLanguageModel（iPhone 18,5）と MLX（iPhone 15）で行う。
+  - 判断基準の「1」は Claude 経路そのものなので、ここが埋まるまで第2段階へ進む判断はしない。
 
 ## スパイクアプリ（FM Spike）の中身
 - 場所: `spike/`（XcodeGen の別プロジェクト `spike/project.yml`、ソースは `spike/FMHarness/`）。
@@ -33,7 +37,7 @@
 ## 手順
 各項目の終わりに「ログをコピー」し、結果記入欄に貼る（API キーはログに出ない）。
 
-### 項目 1: Claude + Tool の承認待ち（iPhone 15 と iPhone 18,5 の両方）
+### 項目 1: Claude + Tool の承認待ち（iPhone 15 と iPhone 18,5 の両方）【後回し: API 契約なし】
 1. バックエンド `Claude (.apiKey)` を選ぶ。「Keychain: キーあり」になっているか確認する。
 2. 「私の名前はケイタ 覚えておいて」を送る。
    - 期待: 承認シート（save_note の承認 / 本文）が出る。ログに `Tool.call save_note text=...` が出る。
@@ -48,14 +52,14 @@
 2. バックエンド `SystemLanguageModel` で項目 1 の手順 2〜4 を行う。
 - 合格条件: 承認シートが出て、承認で保存・拒否で未保存になる。ツールが呼ばれず本文に JSON を書いた場合は「不合格（ツール呼び出しなし）」と記録し、返答本文をそのまま貼る。
 
-### 項目 3: ローカルモデル（MLX Qwen2.5 1.5B、iPhone 18,5。余裕があれば iPhone 15 も）
+### 項目 3: ローカルモデル（MLX Qwen2.5 1.5B、iPhone 18,5 と **iPhone 15**）
 1. Wi-Fi 接続で `MLX Qwen2.5 1.5B` を選び、「モデルを読み込む (preload)」を押す（初回は約 0.9 GB のダウンロード）。
    - ログに読込前後のメモリが出る。Phase 2-0 の計測（docs/phase2-mlx-eval.md: Qwen2.5 1.5B 読込後 831 MB、利用可能 2066 MB）と比べる。
 2. 項目 1 の手順 2〜4 を行う。
 - 合格条件: 読み込みが終わり、`save_note` が呼ばれて承認シートが出る。メモリ警告やアプリ終了が無い。
 - `apple/coreai-models` 経由は今回のスパイクでは実装していない（未着手。mlx-swift-lm 統合が通らなかったときの次の候補）。
 
-### 項目 4: 複数ターンとキャンセル（Claude と SystemLanguageModel で）
+### 項目 4: 複数ターンとキャンセル（SystemLanguageModel〔iPhone 18,5〕と MLX〔iPhone 15〕で。Claude は後回し）
 1. 項目 1 の承認後、同じセッションのまま「私の名前は？」と送る。
    - 期待: 「ケイタ」と答える（トランスクリプト保持）。ログの `transcript entries=` が前回より増えている。
 2. 「新しいセッション」を押してから「私の名前は？」と送る。
@@ -66,7 +70,7 @@
    - 期待: キャンセル後もセッションが使え、答えが返る。
 - 合格条件: 1・3・4 が期待どおり（AT-08 相当）。
 
-### 項目 5: App Attest（iPhone 15）
+### 項目 5: App Attest（iPhone 15）【後回し: API 契約なし】
 **項目 5 の準備（人の操作が要る）:**
 1. Apple Developer の Identifiers で `com.beesan82.pocketagent` に **App Attest** の capability を付け、App Store プロファイルを作り直して Codemagic で Fetch する。
 2. Claude Console の App integrations（https://platform.claude.com/settings/workspaces/default/app-integrations）で Team ID とバンドル ID を登録し、client ID（`clid_...`）を得る。client ID は公開してよい設定値。
@@ -80,14 +84,15 @@
 ## 結果記入欄
 | 項目 | 端末 / iOS | ビルド番号 | 結果（合格 / 不合格 / 未実施） | ログ・備考 |
 |---|---|---|---|---|
-| 1 Claude + 承認待ち | iPhone 15 / | | 未実施 | |
-| 1 Claude + 承認待ち | iPhone 18,5 / | | 未実施 | |
+| 1 Claude + 承認待ち | iPhone 15 / | | 後回し | API 契約なし |
+| 1 Claude + 承認待ち | iPhone 18,5 / | | 後回し | API 契約なし |
 | 2 SystemLanguageModel | iPhone 18,5 / | | 未実施 | |
 | 2 availability | iPhone 15 / | | 未実施 | |
 | 3 MLX Qwen2.5 1.5B | iPhone 18,5 / | | 未実施 | メモリ: |
+| 3 MLX Qwen2.5 1.5B | iPhone 15 / | | 未実施 | メモリ: （非 AI 端末での代替確認） |
 | 4 複数ターン | | | 未実施 | |
 | 4 キャンセル | | | 未実施 | |
-| 5 App Attest | iPhone 15 / | | 未実施 | |
+| 5 App Attest | iPhone 15 / | | 後回し | API 契約なし |
 
 ## 判断（結果が埋まってから書く）
 - 1（iPhone 15）・2・4 が合格 → 第2段階の設計へ。
