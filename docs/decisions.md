@@ -54,8 +54,8 @@
 - 決定: `FoundationModelsClient(tools:context:instructions:)` の `tools` は空で生成する。
 - 理由（v6.1.0 ソースで確認）: `FoundationModelsClient` は渡されたツールを `FMToolAdapter` 経由で FoundationModels のセッション内から直接 `execute` する。`Agent` の `approvalPolicy` / 承認ハンドラを通らないため、外部副作用ツール（LINE 共有）を渡すと承認なしで実行され得る（FR-05 違反）。
 - 対策（実装済み）: `ToolApprovalGate.wrap(_:approval:)`（Runtime）が各ツールを `ApprovalGatedTool` で包み、`execute` の前で `AgentRunner` と同じ規則を適用する（読み取り専用以外は確認、外部副作用はセッション承認を格下げ、確認中のキャンセルは `CancellationError` でツール未実行）。セッション承認は `wrap` 呼び出し単位（会話単位）。
-- Apple ローカルにツールを渡すときは必ず `ToolApprovalGate.wrap` の戻り値を使う。現時点でアプリはまだツールを渡していない。
-- 検証: `ApprovalGatedToolTests` 8 件（CI run 39101910024）。FoundationModels セッション内からの実呼び出しは実機未検証。
+- Apple ローカルにツールを渡すときは必ず `ToolApprovalGate.wrap` の戻り値を使う。チャットは Apple ローカルのクライアントへ、`ToolApprovalGate.wrap` で包んだ 5 つのメモツール（save_note / edit_note / list_notes / search_notes / delete_note）を渡している。承認シートで拒否された呼び出しも「試行」として記録される（ADR-028）。
+- 検証: `ApprovalGatedToolTests` 8 件（CI run 39101910024）。FoundationModels セッション内からの実呼び出しは第1段階の TestFlight で確認予定（docs/verification/2026-10-19-apple-local-tools.md）。
 - 影響要件: FR-05, AT-05, AT-08
 - 状態: 採用
 
@@ -126,6 +126,34 @@
 - 影響: FR-10 の「ツール実行結果」の保存を、プレーン版では意図的に狭めた逸脱。
 - 影響要件: FR-10, AT-10
 - 状態: 暫定（使い方次第で見直し）
+
+## ADR-027 保存済みメモと日誌を毎ターン注入
+- 決定: 保存済みのメモと日誌を毎ターン会話へ注入する。Claude は system メッセージ、Apple ローカルはユーザープロンプトの「これまでの会話:」の前に置く。各項目は 1 行に平坦化する。
+- 上限（`.claude`）: メモ 50 件 / 日誌 20 件×400 字 / 合計 12000 字。
+- 上限（`.appleLocal`）: メモ 10 件×100 字 / 日誌 5 件×150 字 / 合計 1500 字。
+- `edit_note` を追加。`list_notes` / `search_notes` は日誌も `kind` / `title` 付きで返す。日誌はチャットから編集・削除できない（貼り付け文経由の破壊を防ぐ）。
+- 理由: モデルが `list_notes` を呼ばなくても「私の名前は？」に答えられるようにする。特に Apple ローカルはツールを呼べない場合がある。
+- 検証: Core 76 / Runtime 83 / App 121 テスト。GREEN run は 39275624588（Task 1+2）、39279473804（Task 3）、39335923704（Task 4）、39340339947（Task 5+6）、39345177690（Task 7）。実機では未確認。
+- 影響要件: FR-10, AT-05, AT-10
+- 状態: 採用（実機未検証）
+
+## ADR-028 本文中のツール呼び出し JSON の救済と「メモ非対応」表示
+- 決定: ツールを呼べないモデルが返信本文に書いたツール呼び出し JSON を、アシスタントの返信だけから読み取って救済する。ユーザー入力に貼られた JSON は救済しない。
+- 救済した呼び出しは読み取り専用を含めすべて承認シートを通す。拒否されたら返信は残し、何も保存しない。承認待ち中の停止では何も保存しない。
+- `ToolCapabilityTracker` は、Claude 以外のモデルが救済 2 回、またはメモ意図のターンで呼び出しなし 2 回になったら「限定」と判定する。Claude 選択中は通知を出さない。
+- 測定ログ: `toolcall.native|rescued|ambiguous|none model=<raw>[ tool=<name>]`。
+- 理由: 小さなモデルはツール呼び出しを本文に書いてしまう。無視すると「保存した」と誤解させる。
+- 検証: Unit のみ（CI run 39340339947, 39345177690）。実機では未確認。
+- 影響要件: FR-05, AT-05, AT-08
+- 状態: 採用（実機未検証）
+
+## ADR-029 第1段階は iOS 26 のまま。iOS 27 化は Foundation Models スパイクで
+- 決定: 第1段階（ADR-027, 028）は iOS 26 のまま TestFlight へ出す。iOS 27 化と 3 経路を同じ `Tool` で動かす検証は、第2段階の Foundation Models スパイク（`spike/fm-harness`）で行う。
+- MLX へのツール配置は見送る。AgentRunKit 6.1.0 の `MLXClient` が `ContentOnlyTerminatingClient` ではないため。
+- 理由: 実機の結果が出る前に基盤を変えない。スパイクは捨てる前提のコードにする。
+- 検証: なし（方針）。
+- 影響要件: FR-05, Phase 2
+- 状態: 採用（実機未検証）
 
 ## 未決定
 - 永続化: SwiftData を Phase 1 で採用（設計書）。
