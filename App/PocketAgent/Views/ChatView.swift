@@ -12,6 +12,7 @@ struct ChatView: View {
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
+    let settingsView: SettingsView
 
     @Environment(\.modelContext) private var modelContext
     @State private var session: ChatSession?
@@ -20,7 +21,9 @@ struct ChatView: View {
     var body: some View {
         Group {
             if let session {
-                ChatContent(session: session, broker: broker, settings: settings)
+                ChatContent(
+                    session: session, broker: broker, settings: settings, mlxStore: mlxStore,
+                    mlxRuntime: mlxRuntime, measurementLog: measurementLog, settingsView: settingsView)
             } else {
                 ProgressView()
             }
@@ -40,6 +43,7 @@ struct ChatView: View {
                 localModel: MLXLocalModelAccess(store: mlxStore, runtime: mlxRuntime),
                 log: { measurementLog.append($0) })
         }
+        .stopsJournalGeneration(runtime: mlxRuntime, stop: { session?.stop() })
         .onDisappear { session?.stop() }
     }
 }
@@ -48,10 +52,26 @@ private struct ChatContent: View {
     let session: ChatSession
     let broker: ApprovalBroker
     let settings: ModelSettings
+    let mlxStore: MLXModelStore
+    let mlxRuntime: MLXRuntime
+    let measurementLog: MeasurementLog
+    let settingsView: SettingsView
 
     @State private var input = ""
+    @FocusState private var inputFocused: Bool
 
     private var isRunning: Bool { session.isBusy }
+
+    private static let bottomID = "chat-bottom"
+
+    /// The downloaded model is not on the device (checked before sending, or the send just failed on it).
+    private var needsModelDownload: Bool {
+        guard settings.choice == .mlxLocal else { return false }
+        if case let .failed(message) = session.status, message == ModelUnavailableReason.modelNotDownloaded.userMessage {
+            return true
+        }
+        return JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == .modelNotDownloaded
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -60,20 +80,41 @@ private struct ChatContent: View {
                     ForEach(Array(session.turns.enumerated()), id: \.offset) { index, turn in
                         TurnRow(turn: turn).id(index)
                     }
-                    if isRunning {
+                    if !session.streamingText.isEmpty {
+                        // Not saved yet, so no reply actions.
+                        AssistantBubble(text: session.streamingText, showsActions: false)
+                    }
+                    if session.status == .loadingModel {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("モデルを読み込み中…")
+                        }
+                        .foregroundStyle(.secondary)
+                    } else if isRunning && session.streamingText.isEmpty {
                         ProgressView("応答を待っています")
                     }
                     if case let .failed(message) = session.status {
                         Text(message).foregroundStyle(.red)
                     }
+                    Color.clear.frame(height: 1).id(Self.bottomID)
                 }
                 .padding()
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: session.turns.count) {
-                withAnimation { proxy.scrollTo(session.turns.count - 1, anchor: .bottom) }
+                withAnimation { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
+            .onChange(of: session.streamingText) {
+                proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
         }
         .safeAreaInset(edge: .bottom) { inputBar }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完了") { inputFocused = false }
+            }
+        }
         // The setter is a no-op: ApprovalSheet denies its own request by id when it disappears,
         // so closing one sheet can never deny a successor request.
         .sheet(item: Binding(get: { broker.pending }, set: { _ in })) { request in
@@ -91,10 +132,22 @@ private struct ChatContent: View {
                 Text("Claude選択中: 入力・直近の会話・保存済みメモと最近の日誌はAnthropicへ送信されます")
                     .font(.caption).foregroundStyle(.orange)
             }
+            if settings.choice == .mlxLocal {
+                Text("ダウンロードモデル（端末内・ツールなし）: 外部へ送信しません")
+                    .font(.caption).foregroundStyle(.secondary)
+                if needsModelDownload {
+                    NavigationLink("設定でダウンロードする") { settingsView }
+                        .font(.footnote)
+                }
+                if mlxRuntime.state == .unloadedForMemory {
+                    JournalModelStatusView(store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog)
+                }
+            }
             HStack(alignment: .bottom) {
                 TextField("メッセージ", text: $input, axis: .vertical)
                     .lineLimit(1...8)
                     .textFieldStyle(.roundedBorder)
+                    .focused($inputFocused)
                 if isRunning {
                     Button("停止", role: .destructive) { session.stop() }
                         .buttonStyle(.borderedProminent)
@@ -131,13 +184,22 @@ private struct TurnRow: View {
                 .background(.tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         case .assistant:
-            VStack(alignment: .leading, spacing: 8) {
-                Text(turn.text).textSelection(.enabled)
-                ReplyActionsView(text: turn.text)
-            }
-            .padding(10)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            AssistantBubble(text: turn.text, showsActions: true)
         }
+    }
+}
+
+private struct AssistantBubble: View {
+    let text: String
+    let showsActions: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(text).textSelection(.enabled)
+            if showsActions { ReplyActionsView(text: text) }
+        }
+        .padding(10)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

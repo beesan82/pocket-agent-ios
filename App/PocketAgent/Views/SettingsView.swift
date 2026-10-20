@@ -24,35 +24,29 @@ struct SettingsView: View {
     @State private var hasToken = false
     @State private var tokenStatus: String?
     @State private var appleReason: ModelUnavailableReason?
+    @State private var downloadFlow: ModelDownloadFlow
+
+    init(
+        settings: ModelSettings, credentials: any CredentialStore, availability: any ModelAvailabilityChecking,
+        mlxStore: MLXModelStore, mlxRuntime: MLXRuntime, measurementLog: MeasurementLog,
+        developer: DeveloperSettings, tokenStore: any CredentialStore, journal: any JournalStore
+    ) {
+        self.settings = settings
+        self.credentials = credentials
+        self.availability = availability
+        self.mlxStore = mlxStore
+        self.mlxRuntime = mlxRuntime
+        self.measurementLog = measurementLog
+        self.developer = developer
+        self.tokenStore = tokenStore
+        self.journal = journal
+        _downloadFlow = State(initialValue: ModelDownloadFlow(store: mlxStore, measurementLog: measurementLog))
+    }
 
     var body: some View {
         Form {
             Section {
-                ForEach(ModelChoice.allCases.filter { $0 != .mlxLocal }, id: \.self) { choice in
-                    Button {
-                        settings.choice = choice
-                    } label: {
-                        HStack {
-                            Text(choice.displayName)
-                            Spacer()
-                            if settings.choice == choice {
-                                Image(systemName: "checkmark").foregroundStyle(.tint)
-                            }
-                        }
-                    }
-                    .disabled(choice == .appleLocal && appleReason != nil)
-                }
-            } header: {
-                Text("使用するモデル")
-            } footer: {
-                if let appleReason {
-                    Text("Appleローカルは使えません: \(appleReason.userMessage)")
-                } else {
-                    Text("Appleローカルは端末内で推論し、会話を外部へ送信しません。")
-                }
-            }
-
-            Section {
+                choiceRow(.claude, title: "Claude")
                 SecureField("APIキーを貼り付け", text: $keyInput)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -60,30 +54,50 @@ struct SettingsView: View {
                     .disabled(keyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("削除", role: .destructive) { deleteKey() }
                     .disabled(!hasKey)
-                LabeledContent("状態", value: hasKey ? "保存済み" : "未保存")
+                LabeledContent("APIキーの状態", value: hasKey ? "保存済み" : "未保存")
                 if let keyStatus {
                     Text(keyStatus).font(.footnote).foregroundStyle(.secondary)
                 }
-            } header: {
-                Text("Claude APIキー")
-            } footer: {
-                Text("キーはこの端末のKeychainにのみ保存され、画面には再表示されません。")
-            }
-
-            Section("Claude モデルID") {
-                TextField("モデルID", text: $settings.claudeModel)
+                TextField("Claude モデルID", text: $settings.claudeModel)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+            } header: {
+                Text("クラウド")
+            } footer: {
+                Text("キーはこの端末のKeychainにのみ保存され、画面には再表示されません。Claude選択中は、入力と会話の一部がAnthropicへ送信されます。")
+            }
+
+            Section {
+                choiceRow(.appleLocal, title: "Apple（Apple Intelligence）")
+                    .disabled(appleReason != nil)
+                if let appleReason {
+                    Text("使えません: \(appleReason.userMessage)")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Text("ダウンロードモデル").font(.subheadline).foregroundStyle(.secondary)
+                ForEach(MLXModelRegistry.all) { model in
+                    DownloadModelRow(
+                        model: model, flow: downloadFlow,
+                        isChosen: settings.choice == .mlxLocal && mlxStore.selected == model
+                    ) {
+                        mlxStore.selected = model
+                        settings.choice = .mlxLocal
+                    }
+                }
+                if let message = downloadFlow.message {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("ローカル（端末内）")
+            } footer: {
+                Text("日誌タブは常に、ここで選んだダウンロードモデルを使います（チャットの選択とは別）。ダウンロードモデルとAppleは端末内で処理し、外部へ送信しません。")
             }
 
             Section("検証") {
                 NavigationLink("1往復テスト（実機検証用）") {
                     RoundTripView(settings: settings, credentials: credentials, availability: availability)
                 }
-            }
-
-            Section("端末内モデル（MLX）") {
-                NavigationLink("モデル管理") {
+                NavigationLink("モデル管理（詳細）") {
                     MLXModelsView(store: mlxStore, measurementLog: measurementLog)
                 }
                 NavigationLink("MLX 検証（実機ゲート）") {
@@ -115,6 +129,22 @@ struct SettingsView: View {
             Button("キャンセル", role: .cancel) {}
         }
         .task { refresh() }
+        .modelDownloadDialogs(downloadFlow)
+    }
+
+    private func choiceRow(_ choice: ModelChoice, title: String) -> some View {
+        Button {
+            settings.choice = choice
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                if settings.choice == choice {
+                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                        .accessibilityLabel("選択中")
+                }
+            }
+        }
     }
 
     private var developerSection: some View {
@@ -193,6 +223,7 @@ struct SettingsView: View {
     private func refresh() {
         // If Apple local is already selected but unavailable, the choice is kept as is:
         // switching to Claude silently would send the conversation to the cloud (AT-03).
+        mlxStore.refresh()
         appleReason = availability.appleLocalUnavailableReason()
         do {
             hasKey = try credentials.readAPIKey()?.isEmpty == false

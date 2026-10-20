@@ -45,15 +45,13 @@ struct ConversationListView: View {
             ChatView(
                 conversation: conversation, settings: settings,
                 credentials: credentials, availability: availability, journal: journal,
-                mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog)
+                mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
+                settingsView: settingsView)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
-                    SettingsView(
-                        settings: settings, credentials: credentials, availability: availability,
-                        mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
-                        developer: developer, tokenStore: tokenStore, journal: journal)
+                    settingsView
                 } label: {
                     Image(systemName: "gearshape")
                 }
@@ -70,6 +68,13 @@ struct ConversationListView: View {
         } message: {
             Text(errorText ?? "")
         }
+    }
+
+    private var settingsView: SettingsView {
+        SettingsView(
+            settings: settings, credentials: credentials, availability: availability,
+            mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
+            developer: developer, tokenStore: tokenStore, journal: journal)
     }
 
     private func create() {
