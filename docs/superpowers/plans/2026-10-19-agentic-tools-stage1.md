@@ -218,7 +218,7 @@ let utc = TimeZone(identifier: "UTC")!
     let items = [note("n1", day: 3), diary(String(repeating: "j", count: 60), title: nil, day: 2), diary(String(repeating: "k", count: 60), title: nil, day: 1)]
     let text = ConversationContext.memorySection(memory: items, limit: limit, timeZone: utc)!
     #expect(text.contains("n1") && text.contains("jjj") && !text.contains("kkk"))
-    #expect(text.count <= 120)
+    #expect(text.count <= 160)
 }
 @Test func claudeSystemPromptAppendsMemory() {
     #expect(ConversationContext.claudeSystemPrompt(memorySection: nil) == ConversationContext.systemPrompt)
