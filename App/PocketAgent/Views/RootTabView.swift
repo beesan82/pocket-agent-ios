@@ -21,14 +21,16 @@ struct RootTabView: View {
             Tab("日誌", systemImage: "book") {
                 NavigationStack {
                     JournalView(
-                        journal: journal, mlxStore: mlxStore, mlxRuntime: mlxRuntime,
+                        journal: journal, settings: settings, availability: availability,
+                        mlxStore: mlxStore, mlxRuntime: mlxRuntime,
                         measurementLog: measurementLog, settingsView: settingsView)
                 }
             }
             Tab("聞く", systemImage: "bubble.left.and.text.bubble.right") {
                 NavigationStack {
                     AskJournalView(
-                        journal: journal, mlxStore: mlxStore, mlxRuntime: mlxRuntime,
+                        journal: journal, settings: settings, availability: availability,
+                        mlxStore: mlxStore, mlxRuntime: mlxRuntime,
                         measurementLog: measurementLog, settingsView: settingsView)
                 }
             }

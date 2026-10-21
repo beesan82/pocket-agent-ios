@@ -20,7 +20,7 @@ public protocol JournalAssisting: Sendable {
     func ask(_ question: String, store: any JournalStore) async throws -> AskResult
 }
 
-/// Journal features on top of any `LLMClient` (the on-device MLX client in the app).
+/// Journal features on top of any `LLMClient` (an on-device client in the app: MLX or Apple).
 /// Retrieval runs in the app; the model only picks search terms and writes the answer.
 public struct JournalAssistant: JournalAssisting {
     static let emptyJournalMessage = "日誌がまだありません"
@@ -29,11 +29,17 @@ public struct JournalAssistant: JournalAssisting {
     private let client: any LLMClient
     private let now: @Sendable () -> Date
     private let calendar: Calendar
+    /// Upper bound on journal characters in the answer prompt (smaller for small context windows).
+    private let contextCharacterBudget: Int
 
-    public init(client: any LLMClient, now: @escaping @Sendable () -> Date = Date.init, calendar: Calendar = .current) {
+    public init(
+        client: any LLMClient, now: @escaping @Sendable () -> Date = Date.init, calendar: Calendar = .current,
+        contextCharacterBudget: Int = 3000
+    ) {
         self.client = client
         self.now = now
         self.calendar = calendar
+        self.contextCharacterBudget = contextCharacterBudget
     }
 
     public func summarize(_ text: String) -> AsyncThrowingStream<String, Error> {
@@ -71,7 +77,7 @@ public struct JournalAssistant: JournalAssisting {
         let recent = try await store.recent(limit: Self.recentLimit)
 
         let selection = JournalRetrieval.select(inRange: inRange, hitsByTerm: hitsByTerm, recent: recent)
-        let packed = JournalContextPacker.pack(selection.entries)
+        let packed = JournalContextPacker.pack(selection.entries, maxTotalCharacters: contextCharacterBudget)
         try Task.checkCancellation()
 
         let messages: [ChatMessage] = [

@@ -13,6 +13,8 @@ struct CaptureRequest: Identifiable {
 struct JournalCaptureView: View {
     let request: CaptureRequest
     let journal: any JournalStore
+    let settings: ModelSettings
+    let availability: any ModelAvailabilityChecking
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
@@ -27,6 +29,11 @@ struct JournalCaptureView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var confirmDiscard = false
 
+    /// Follows Settings: Apple when chosen and usable, otherwise the downloaded model. Never Claude.
+    private var backend: JournalBackend {
+        JournalModelAccess.backend(settings: settings, availability: availability)
+    }
+
     /// Text that would be lost on close; the sheet only closes after asking.
     private var hasUnsavedText: Bool {
         !(session?.transcript ?? request.transcript).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -38,7 +45,10 @@ struct JournalCaptureView: View {
                 if let session {
                     CaptureForm(
                         session: session, mlxStore: mlxStore, mlxRuntime: mlxRuntime,
-                        measurementLog: measurementLog, onSummarize: summarizeManually)
+                        measurementLog: measurementLog, backend: backend,
+                        showsAppleFallbackNote: JournalModelAccess.usesDownloadedInsteadOfApple(
+                            settings: settings, backend: backend),
+                        onSummarize: summarizeManually)
                 } else {
                     ProgressView()
                 }
@@ -84,16 +94,18 @@ struct JournalCaptureView: View {
         session?.stopSummary()
     }
 
-    /// 「要約する」: loads the downloaded model if needed, then summarizes without the length threshold.
+    /// 「要約する」: loads the downloaded model if needed (Apple needs no load), then summarizes
+    /// without the length threshold.
     private func summarizeManually() {
         guard let session else { return }
         manualTask?.cancel()
+        let current = backend
         manualTask = Task {
-            let client = await JournalModelAccess.client(store: mlxStore, runtime: mlxRuntime)
+            let client = await JournalModelAccess.client(current, store: mlxStore, runtime: mlxRuntime)
             guard !Task.isCancelled else { return }
             manualTask = nil
             guard let client else { return }
-            session.assistant = JournalModelAccess.assistant(client: client)
+            session.assistant = JournalModelAccess.assistant(client: client, backend: current)
             session.modelReady = true
             session.summarize(isForeground: isForeground)
         }
@@ -101,10 +113,12 @@ struct JournalCaptureView: View {
 
     private func start() async {
         guard session == nil else { return }
-        let client = JournalModelAccess.readyClient(store: mlxStore, runtime: mlxRuntime)
+        let current = backend
+        let client = JournalModelAccess.readyClient(current, store: mlxStore, runtime: mlxRuntime)
         let created = JournalCaptureSession(
             source: request.source, store: journal,
-            assistant: client.map { JournalModelAccess.assistant(client: $0) }, modelReady: client != nil)
+            assistant: client.map { JournalModelAccess.assistant(client: $0, backend: current) },
+            modelReady: client != nil)
         created.transcript = request.transcript
         session = created
         if client != nil {
@@ -114,10 +128,10 @@ struct JournalCaptureView: View {
         // Long enough to summarize: load the downloaded model once, then summarize.
         let trimmed = request.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard SummaryPolicy.shouldSummarize(text: trimmed, modelReady: true) else { return }
-        guard let loaded = await JournalModelAccess.client(store: mlxStore, runtime: mlxRuntime),
+        guard let loaded = await JournalModelAccess.client(current, store: mlxStore, runtime: mlxRuntime),
               !Task.isCancelled, created.phase == .editing
         else { return }
-        created.assistant = JournalModelAccess.assistant(client: loaded)
+        created.assistant = JournalModelAccess.assistant(client: loaded, backend: current)
         created.modelReady = true
         created.beginIfNeeded(isForeground: isForeground)
     }
@@ -128,15 +142,18 @@ private struct CaptureForm: View {
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
+    let backend: JournalBackend
+    let showsAppleFallbackNote: Bool
     let onSummarize: () -> Void
 
     private var isSummarizing: Bool { session.phase == .summarizing }
     private var isBusy: Bool { session.phase == .saving }
-    /// Loaded, or downloaded and loadable on tap; otherwise the status view shows why not.
+    /// Apple, or the downloaded model loaded or loadable on tap; otherwise the status view shows why not.
     private var canSummarize: Bool {
-        JournalModelAccess.readyClient(store: mlxStore, runtime: mlxRuntime) != nil
-            || JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == nil
+        JournalModelAccess.isReady(backend, store: mlxStore, runtime: mlxRuntime)
+            || JournalModelAccess.reason(backend, store: mlxStore, runtime: mlxRuntime) == nil
     }
+    private var isLoading: Bool { backend == .mlxLocal && mlxRuntime.state == .loading }
 
     var body: some View {
         Form {
@@ -171,10 +188,11 @@ private struct CaptureForm: View {
             if !isSummarizing {
                 Section {
                     Button("要約する") { onSummarize() }
-                        .disabled(isBusy || isEmpty || !canSummarize || mlxRuntime.state == .loading)
+                        .disabled(isBusy || isEmpty || !canSummarize || isLoading)
                     JournalModelStatusView(
                         store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog,
-                        linksToModelManagement: false)
+                        linksToModelManagement: false, backend: backend,
+                        showsAppleFallbackNote: showsAppleFallbackNote)
                     if !canSummarize {
                         Text("要約せずに保存できます。").font(.footnote).foregroundStyle(.secondary)
                     }

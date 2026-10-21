@@ -2,9 +2,11 @@ import PocketAgentCore
 import PocketAgentRuntime
 import SwiftUI
 
-/// "Ask the journal" with the on-device model. Nothing here leaves the device.
+/// "Ask the journal" with the on-device model chosen in Settings (never Claude). Nothing here leaves the device.
 struct AskJournalView: View {
     let journal: any JournalStore
+    let settings: ModelSettings
+    let availability: any ModelAvailabilityChecking
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
@@ -17,10 +19,12 @@ struct AskJournalView: View {
     @FocusState private var inputFocused: Bool
 
     init(
-        journal: any JournalStore, mlxStore: MLXModelStore, mlxRuntime: MLXRuntime,
-        measurementLog: MeasurementLog, settingsView: SettingsView
+        journal: any JournalStore, settings: ModelSettings, availability: any ModelAvailabilityChecking,
+        mlxStore: MLXModelStore, mlxRuntime: MLXRuntime, measurementLog: MeasurementLog, settingsView: SettingsView
     ) {
         self.journal = journal
+        self.settings = settings
+        self.availability = availability
         self.mlxStore = mlxStore
         self.mlxRuntime = mlxRuntime
         self.measurementLog = measurementLog
@@ -29,10 +33,13 @@ struct AskJournalView: View {
     }
 
     private var isBusy: Bool { preparing || session.isRunning }
+    private var backend: JournalBackend {
+        JournalModelAccess.backend(settings: settings, availability: availability)
+    }
     private var canAsk: Bool {
         !isBusy && !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (JournalModelAccess.readyClient(store: mlxStore, runtime: mlxRuntime) != nil
-                || JournalModelAccess.reason(store: mlxStore, runtime: mlxRuntime) == nil)
+            && (JournalModelAccess.isReady(backend, store: mlxStore, runtime: mlxRuntime)
+                || JournalModelAccess.reason(backend, store: mlxStore, runtime: mlxRuntime) == nil)
     }
 
     var body: some View {
@@ -52,8 +59,12 @@ struct AskJournalView: View {
                     Button("聞く") { ask() }
                         .disabled(!canAsk)
                 }
-                if JournalModelAccess.readyClient(store: mlxStore, runtime: mlxRuntime) == nil {
-                    JournalModelStatusView(store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog)
+                let current = backend
+                let fallsBack = JournalModelAccess.usesDownloadedInsteadOfApple(settings: settings, backend: current)
+                if fallsBack || !JournalModelAccess.isReady(current, store: mlxStore, runtime: mlxRuntime) {
+                    JournalModelStatusView(
+                        store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog,
+                        backend: current, showsAppleFallbackNote: fallsBack)
                 }
             } header: {
                 Text("質問")
@@ -133,14 +144,15 @@ struct AskJournalView: View {
         let text = question
         prepareTask?.cancel()
         preparing = true
+        let current = backend
         prepareTask = Task {
-            // Loads the downloaded model when needed; the assistant is built from the current client.
-            let client = await JournalModelAccess.client(store: mlxStore, runtime: mlxRuntime)
+            // Apple is ready at once; the downloaded model is loaded when needed.
+            let client = await JournalModelAccess.client(current, store: mlxStore, runtime: mlxRuntime)
             guard !Task.isCancelled else { return }  // stop() already reset the state
             preparing = false
             prepareTask = nil
             guard let client else { return }
-            session.assistant = JournalModelAccess.assistant(client: client)
+            session.assistant = JournalModelAccess.assistant(client: client, backend: current)
             session.ask(text)
         }
     }

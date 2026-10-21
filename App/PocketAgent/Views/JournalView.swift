@@ -4,6 +4,8 @@ import SwiftUI
 /// Home: the journal by day (newest first), search, and recording by voice or text.
 struct JournalView: View {
     let journal: any JournalStore
+    let settings: ModelSettings
+    let availability: any ModelAvailabilityChecking
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
@@ -75,8 +77,8 @@ struct JournalView: View {
         .task { await speech.refreshAvailability() }
         .sheet(item: $capture) { request in
             JournalCaptureView(
-                request: request, journal: journal, mlxStore: mlxStore, mlxRuntime: mlxRuntime,
-                measurementLog: measurementLog
+                request: request, journal: journal, settings: settings, availability: availability,
+                mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog
             ) {
                 if request.source == .text { input = "" }
                 reloadToken += 1

@@ -1,9 +1,11 @@
 import AgentRunKit
+import AgentRunKitFoundationModels
 import PocketAgentCore
 import PocketAgentRuntime
 import SwiftUI
 
-/// The on-device model as the journal screens see it. "Ready" means a loaded client.
+/// The on-device model as the journal screens see it. "Ready" means a usable client: Apple's at once,
+/// the downloaded model's once loaded. The `store:runtime:` forms are the downloaded model only (the chat uses them).
 @MainActor
 enum JournalModelAccess {
     /// 今週/先週 start on Monday, in the device's time zone.
@@ -14,8 +16,53 @@ enum JournalModelAccess {
         return calendar
     }
 
-    static func assistant(client: any LLMClient) -> JournalAssistant {
-        JournalAssistant(client: client, calendar: journalCalendar)
+    static func assistant(client: any LLMClient, backend: JournalBackend) -> JournalAssistant {
+        JournalAssistant(
+            client: client, calendar: journalCalendar,
+            contextCharacterBudget: JournalModelRule.contextCharacterBudget(for: backend))
+    }
+
+    /// Follows Settings: Apple when chosen and usable, otherwise the downloaded model. Never Claude.
+    static func backend(settings: ModelSettings, availability: any ModelAvailabilityChecking) -> JournalBackend {
+        JournalModelRule.backend(choice: settings.choice, availability: availability)
+    }
+
+    /// Apple is chosen but cannot be used here, so the journal runs on the downloaded model.
+    static func usesDownloadedInsteadOfApple(settings: ModelSettings, backend: JournalBackend) -> Bool {
+        settings.choice == .appleLocal && backend == .mlxLocal
+    }
+
+    static func reason(_ backend: JournalBackend, store: MLXModelStore, runtime: MLXRuntime) -> ModelUnavailableReason? {
+        switch backend {
+        case .appleLocal: nil
+        case .mlxLocal: reason(store: store, runtime: runtime)
+        }
+    }
+
+    static func readyClient(_ backend: JournalBackend, store: MLXModelStore, runtime: MLXRuntime) -> (any LLMClient)? {
+        switch backend {
+        case .appleLocal: return appleClient()
+        case .mlxLocal: return readyClient(store: store, runtime: runtime)
+        }
+    }
+
+    static func isReady(_ backend: JournalBackend, store: MLXModelStore, runtime: MLXRuntime) -> Bool {
+        switch backend {
+        case .appleLocal: true
+        case .mlxLocal: readyClient(store: store, runtime: runtime) != nil
+        }
+    }
+
+    static func client(_ backend: JournalBackend, store: MLXModelStore, runtime: MLXRuntime) async -> (any LLMClient)? {
+        switch backend {
+        case .appleLocal: return appleClient()
+        case .mlxLocal: return await client(store: store, runtime: runtime)
+        }
+    }
+
+    /// No tools: the journal sends single-turn system + user prompts.
+    private static func appleClient() -> any LLMClient {
+        FoundationModelsClient<EmptyContext>(tools: [], context: EmptyContext())
     }
 
     static func reason(store: MLXModelStore, runtime: MLXRuntime) -> ModelUnavailableReason? {
@@ -48,8 +95,24 @@ struct JournalModelStatusView: View {
     let measurementLog: MeasurementLog
     /// False inside a sheet: the models screen cannot present its confirmations there.
     var linksToModelManagement = true
+    /// Apple needs no download or load, so there is nothing to show for it.
+    var backend: JournalBackend = .mlxLocal
+    /// Apple was chosen but is not usable here.
+    var showsAppleFallbackNote = false
 
     var body: some View {
+        // No wrapping stack: in a Form an empty stack would still draw a row.
+        if backend == .mlxLocal {
+            if showsAppleFallbackNote {
+                Text("Apple は使えないため、ダウンロードモデルを使います")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            downloadedModelStatus
+        }
+    }
+
+    @ViewBuilder
+    private var downloadedModelStatus: some View {
         if JournalModelAccess.readyClient(store: store, runtime: runtime) != nil {
             EmptyView()
         } else if runtime.state == .loading {

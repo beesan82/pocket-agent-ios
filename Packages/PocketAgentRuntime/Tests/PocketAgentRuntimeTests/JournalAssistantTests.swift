@@ -178,6 +178,31 @@ struct JournalAssistantTests {
         }
     }
 
+    // Apple's small context window gets a smaller budget; the caller picks it, not the client type.
+    @Test func askUsesContextBudget() async throws {
+        let items = (1...25).map { (jst(10, $0), "散歩\($0)日目" + String(repeating: "あ", count: 100)) }
+        let (store, _) = try await makeStore(items)
+
+        func entriesInPrompt(budget: Int) async throws -> (evidence: Int, total: Int, inPrompt: Int) {
+            let client = ScriptedTextClient(generate: [.reply(#"["散歩"]"#)], stream: [answered])
+            let assistant = JournalAssistant(
+                client: client, now: { fixedNow }, calendar: tokyo, contextCharacterBudget: budget)
+            let result = try await assistant.ask("散歩の記録は？", store: store)
+            let call = try #require(client.calls.last)
+            let prompt = userText(call)
+            return (result.evidence.count, result.evidence.reduce(0) { $0 + $1.text.count },
+                    prompt.components(separatedBy: "--- 日誌 (").count - 1)
+        }
+
+        let wide = try await entriesInPrompt(budget: 3000)
+        let narrow = try await entriesInPrompt(budget: 1500)
+
+        #expect(narrow.inPrompt < wide.inPrompt)
+        #expect(narrow.inPrompt == narrow.evidence)
+        #expect(narrow.total <= 1500)
+        #expect(narrow.evidence > 0)
+    }
+
     @Test func recentFallbackIsDeclared() async throws {
         let items = (1...12).map { (jst(10, $0), "日記\($0)") }
         let client = ScriptedTextClient(generate: [.reply(#"["宇宙"]"#)], stream: [answered])
