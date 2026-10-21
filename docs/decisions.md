@@ -219,3 +219,9 @@
 - 検証: Core `mlxLocalNeverReadsKeyOrBuildsClients`、Runtime `LocalChatTests`、App `ChatSessionLocalTests`（`mlxLocalNeverTouchesResolverOrKey`、`stopDoesNotSavePartial`、`unloadDuringStreamDoesNotSavePartial` ほか）、`ModelSettingsTests`（移行）。CI run 39476767480（App 148 件）。
 - 影響要件: FR-02, FR-03, AT-03, AT-14
 - 状態: 採用（設定の階層 UI、チャット往復、機内モード、停止、ダイアログ表示は実機未検証）
+
+## ADR-032 日誌タブは設定の端末内モデルに従う（Apple が使えれば Apple、それ以外はダウンロードモデル）
+- 決定: 日誌の要約と「日誌に聞く」は、設定で Apple を選んでいてこの端末で使えるなら Apple（`FoundationModelsClient`、ツールなし）、それ以外（Claude 選択時、ダウンロードモデル選択時、Apple 不可の端末）はダウンロードモデルを使う（ユーザー判断、2026-10-22）。Claude は日誌に使わず、日誌の経路は API キーを読まない。判定は Core の `JournalModelRule`。Apple 選択で使えない場合は「Apple は使えないため、ダウンロードモデルを使います」と表示する。Apple は文脈が小さい（約 4096 トークン）ため、「日誌に聞く」に詰める日誌は Apple 1500 字、ダウンロードモデル 3000 字。要約の入力は切り詰めず、超過時は既存の固定の失敗文を出す。ADR-026 までの「日誌は常にダウンロードモデル」を置き換える。
+- 検証: `JournalModelRuleTests`（4 規則＋可用性は Apple 選択時のみ確認）、`JournalAssistantTests.askUsesContextBudget`、`JournalModelAccessTests`（Apple は読み込みなしで準備完了、ダウンロードモデル経路は従来どおり）。CI run 39692758413（Core 87 / Runtime 96 / App 156）。
+- 影響要件: FR-15, AT-14
+- 状態: 採用（Apple での要約・質問は実機未検証: シミュレータでは動かず、iPhone 15 は Apple Intelligence 非対応。1500 字が文脈に収まるかも未確認）
