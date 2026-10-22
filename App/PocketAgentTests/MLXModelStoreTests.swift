@@ -236,6 +236,14 @@ struct MLXModelStoreTests {
         #expect(makeStore(FakeDownloader(), defaults: defaults).selected == MLXModelRegistry.default)
     }
 
+    /// Models downloaded by earlier builds (swift-transformers `HubApi`) must load without re-downloading.
+    @Test func downloaderDirectoryLayoutUnchanged() {
+        let directory = HubModelDownloader.directory(
+            of: MLXModelRegistry.default, at: URL(fileURLWithPath: "/b", isDirectory: true))
+        #expect(directory.path(percentEncoded: false) == "/b/models/\(MLXModelRegistry.default.id)/")
+        #expect(MLXModelRegistry.default.id == "mlx-community/Qwen2.5-1.5B-Instruct-4bit")
+    }
+
     @Test func hubDownloaderChecksConfigAndWeights() throws {
         let base = FileManager.default.temporaryDirectory.appending(path: "HubCheck-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }

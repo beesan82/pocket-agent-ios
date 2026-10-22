@@ -6,11 +6,11 @@ struct SDKLinkCheckTests {
         #expect(SDKLinkCheck.anthropicHost == "api.anthropic.com")
     }
 
-    @Test func foundationModelsClientIsLinked() {
-        #expect(SDKLinkCheck.foundationModelsClientTypeName.contains("FoundationModelsClient"))
+    @Test func appleOnDeviceModelIsLinked() {
+        #expect(SDKLinkCheck.appleModelTypeName.contains("SystemLanguageModel"))
     }
 
-    @Test func mlxClientIsLinked() {
-        #expect(SDKLinkCheck.mlxClientTypeName.contains("MLXClient"))
+    @Test func mlxModelIsLinked() {
+        #expect(SDKLinkCheck.mlxModelTypeName.contains("MLXLanguageModel"))
     }
 }

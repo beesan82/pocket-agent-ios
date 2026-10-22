@@ -28,7 +28,7 @@ final class FakeLoader: ModelLoading, @unchecked Sendable {
 
     func release() { gate.open() }
 
-    func load(_ model: MLXModelInfo, directory: URL) async throws -> any LLMClient {
+    func load(_ model: MLXModelInfo, directory: URL) async throws -> LoadedOnDeviceModel {
         lock.withLock {
             _loads.append(model.id)
             _directories.append(directory)
@@ -39,10 +39,10 @@ final class FakeLoader: ModelLoading, @unchecked Sendable {
             try await Task.sleep(for: .milliseconds(20))
         }
         if fails { throw FakeError.failed }
-        return FakeLLMClient([])
+        return LoadedOnDeviceModel(
+            textClient: FakeLLMClient([]), languageModel: nil,
+            release: { [self] in lock.withLock { _releases += 1 } })
     }
-
-    func releaseMemory() { lock.withLock { _releases += 1 } }
 }
 
 @MainActor
@@ -147,6 +147,26 @@ struct MLXRuntimeTests {
         #expect(runtime.state == .idle)
         #expect(runtime.client == nil)
         #expect(loader.releases == 1)
+    }
+
+    @Test func supersededLoadReleasesLateModel() async throws {
+        let loader = FakeLoader(gated: true)
+        let runtime = makeRuntime(loader)
+        let first = model
+        let other = MLXModelRegistry.qwen3_1_7B
+
+        let loadingFirst = Task { await runtime.load(first) }
+        #expect(try await waitUntil { runtime.state == .loading && loader.loads.count == 1 })
+        let loadingOther = Task { await runtime.load(other) }
+        #expect(try await waitUntil { loader.loads.count == 2 })
+        loader.release()
+        await loadingFirst.value
+        await loadingOther.value
+
+        // The first model loaded after it was superseded: dropped and released, never used.
+        #expect(loader.releases == 1)
+        #expect(runtime.loadedModelID == other.id)
+        #expect(runtime.state == .loaded)
     }
 
     @Test func memoryWarningUnloadsAndExplains() async {
