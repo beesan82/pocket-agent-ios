@@ -85,7 +85,7 @@ final class MeetingSession {
         case .preparing, .recording, .paused, .finishing: return
         case .idle, .saved, .failed: break
         }
-        reset()
+        clear(keepingAssistant: true)  // the screen set the assistant for this meeting
         startedAt = now()
         state = .preparing
         await beginCapture()
@@ -309,7 +309,12 @@ final class MeetingSession {
     }
 
     /// Back to the start screen (after 「保存しました」 or a failure that is not worth retrying).
+    /// Drops the assistant too: the screen picks the current backend / client again on the next start.
     func reset() {
+        clear(keepingAssistant: false)
+    }
+
+    private func clear(keepingAssistant: Bool) {
         switch state {
         case .idle, .saved, .failed: break
         case .preparing, .recording, .paused, .finishing: return
@@ -317,7 +322,7 @@ final class MeetingSession {
         stopNotesUpdate()
         consumeTask?.cancel()
         consumeTask = nil
-        assistant = nil  // the screen picks the current backend / client again on the next start
+        if !keepingAssistant { assistant = nil }
         segments = []
         volatileText = ""
         notes = ""
