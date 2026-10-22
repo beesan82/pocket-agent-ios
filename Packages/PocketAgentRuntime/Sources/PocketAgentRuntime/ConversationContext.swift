@@ -17,6 +17,8 @@ public struct HistoryBudget: Sendable {
     public static let appleLocal = HistoryBudget(maxTurns: 6, maxCharacters: 4000)
     /// Sized for the on-device MLX chat model, which has no tools and a small context window.
     public static let mlxLocal = HistoryBudget(maxTurns: 8, maxCharacters: 3000)
+    /// On-device chat folds only the user's earlier turns (`LocalAgentPrompt`), so less is needed.
+    public static let onDeviceUserTurns = HistoryBudget(maxTurns: 6, maxCharacters: 1500)
 }
 
 /// How much saved memory (notes and journal entries) is injected into the prompt.
@@ -187,6 +189,11 @@ extension ConversationContext {
     public static func claudeSystemPrompt(memorySection: String?) -> String {
         guard let memorySection else { return systemPrompt }
         return systemPrompt + "\n\n" + memorySection
+    }
+
+    /// Session instructions for on-device chat: the same rules (including the tool rule) plus memory.
+    public static func onDeviceInstructions(memorySection: String?) -> String {
+        claudeSystemPrompt(memorySection: memorySection)
     }
 
     /// System prompt for text-only on-device MLX chat: no tools, so it must not claim to save or delete.
