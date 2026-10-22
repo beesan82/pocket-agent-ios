@@ -110,7 +110,7 @@
 - 承認: `call` の中で既存の承認（`ApprovalBroker` の承認シート）を待つ。方針は現在の Apple ローカルと同じにする（筆者の判断。挙動を変えない）:
   - ネイティブに呼ばれた読み取りツール（`list_notes` / `search_notes`、`ToolRisk.readOnly`）は承認シートを出さずに実行する（`ToolRisk.requiresApproval` のとおり）。書き込み 3 種は必ず承認。
   - 救済で拾った呼び出しは、読み取りツールも含めて必ず承認シートを通す（第1段階のまま）。
-  - 「この会話では常に許可」の効き目は**1 ターン**（今の Apple ローカルは送信ごとに `ToolApprovalGate.wrap` が新しい `SessionApprovals` を作る）。毎ターン新しいセッションにするので、承認状態もターンごとに作る。Claude の扱い（`ConversationApprovals`）は変えない。
+  - 「この会話では常に許可」は今と同じく**会話単位**。`ChatSession` の `approvalHandler`（`ConversationApprovals().handler`）を端末内でも使うので、毎ターン新しいセッションでも会話の間は効く。新しい会話・アプリ再起動で消える。`ToolApprovalGate.wrap` が送信ごとに作る `SessionApprovals` は 1 ターン内の重複を省くだけ。
 - 実行記録: 現在の `RecordingTool` と同等に「ネイティブ呼び出しがあったか」を記録し、救済と tracker の判定に使う。
 
 ### D6 片付け
