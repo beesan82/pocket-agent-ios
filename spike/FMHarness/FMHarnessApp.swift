@@ -77,8 +77,12 @@ struct SpikeView: View {
                     Stepper("回数: \(trials)", value: $trials, in: 1...10)
                     Button("実験を実行（自動承認・毎回新しいセッション）") { startExperiment() }
                         .disabled(running != nil)
-                    Button("全部実行（A・B・C × 既定・greedy）") { startAllExperiments() }
+                    Button("全部実行（A〜D2 × 既定・greedy）") { startAllExperiments() }
                         .disabled(running != nil)
+                    Button("D だけ実行（D1・D2 × 既定・greedy）") {
+                        startAllExperiments(only: [.foldChat, .foldTool])
+                    }
+                    .disabled(running != nil)
                     Button("結果だけコピー（400字以内）") { UIPasteboard.general.string = log.summaryText }
                     if !log.summaries.isEmpty {
                         Text(log.summaryText).font(.caption.monospaced())
@@ -164,12 +168,12 @@ struct SpikeView: View {
         }
     }
 
-    private func startAllExperiments() {
+    private func startAllExperiments(only experiments: [Experiment] = Experiment.allCases) {
         let (trials, backend) = (trials, backend)
         running = Task {
             approvals.autoApprove = true
             for sampling in Sampling.allCases {
-                for experiment in Experiment.allCases where !Task.isCancelled {
+                for experiment in experiments where !Task.isCancelled {
                     await runExperiment(
                         experiment, sampling: sampling, trials: trials, backend: backend,
                         makeTools: { [SaveNoteTool(approvals: approvals, notes: notes, log: log)] },
