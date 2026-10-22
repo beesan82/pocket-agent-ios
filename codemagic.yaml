@@ -36,7 +36,7 @@ workflows:
           brew install xcodegen
           xcodegen generate
           mkdir -p "$XCODE_PROJECT/project.xcworkspace/xcshareddata/swiftpm"
-          cp App/Package.resolved \
+          cp Packages/PocketAgentRuntime/Package.resolved \
             "$XCODE_PROJECT/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - name: Resolve packages
         script: |
