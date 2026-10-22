@@ -59,8 +59,9 @@ public struct JournalAssistant: JournalAssisting {
             .system(JournalPrompts.meetingNotesSystem),
             .user(JournalPrompts.meetingNotesUser(previous: previous, newText: newText))
         ]
+        // Three headings × up to 7 Japanese bullets: 512 would cut the tail off.
         return StreamBridge.contentOnly(
-            client.stream(messages: messages, tools: [], requestContext: LocalGeneration.requestContext(maxTokens: 512)))
+            client.stream(messages: messages, tools: [], requestContext: LocalGeneration.requestContext(maxTokens: 1024)))
     }
 
     public func ask(_ question: String, store: any JournalStore) async throws -> AskResult {

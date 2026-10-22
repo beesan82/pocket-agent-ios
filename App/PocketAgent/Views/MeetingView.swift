@@ -267,6 +267,7 @@ struct MeetingView: View {
             await meeting.start()
             guard !Task.isCancelled else { return }
             if case .failed = meeting.state { return }
+            meeting.batchCharacterBudget = JournalModelRule.contextCharacterBudget(for: current)
             if let ready = JournalModelAccess.readyClient(current, store: mlxStore, runtime: mlxRuntime) {
                 meeting.assistant = JournalModelAccess.assistant(client: ready, backend: current)
                 return

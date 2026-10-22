@@ -8,6 +8,8 @@ enum TranscriptEvent: Sendable, Equatable {
     case final(TranscriptSegment)
     /// The capture ended on its own with a fixed user-facing message; what was recognized stays valid.
     case failed(String)
+    /// The audio interruption that ended this capture is over and the system allows recording again.
+    case interruptionEnded
 }
 
 /// A live on-device transcription the meeting session can start, stop and listen to.

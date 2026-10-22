@@ -171,11 +171,12 @@
 ### 実装済み（CI で自動テスト合格）
 - Core: `TranscriptSegment`、`MeetingTranscriptFormatter`（`[mm:ss]`／`h:mm:ss`）、`MeetingNotesPolicy`（300 文字・60 秒）、`MeetingTitle`
 - Runtime: `JournalAssisting.updateMeetingNotes(previous:newText:)` と `JournalPrompts.meetingNotes*`（3 見出し固定）
-- App: `TranscriptSource` / `TranscriptEvent`、`SpeechCapture` の確定セグメントのイベントストリームと割り込み検知、`MeetingSession`、「会議」タブ（`MeetingView`）、`UIBackgroundModes: audio`
+- App: `TranscriptSource` / `TranscriptEvent`、`SpeechCapture` の確定セグメントのイベントストリーム、割り込み検知と `.shouldResume` での自動再開、共有 `AVAudioSession` の参照カウント解放（日誌の音声入力が会議を切らない）、`MeetingSession`（要点はモデルの文脈予算 1500/3000 字で分割更新、3 見出し欠けの出力は破棄、終了時は停止が確定した最後の発言まで取り込む）、「会議」タブ（`MeetingView`）、`UIBackgroundModes: audio`
 
 ### 実機で未検証（iPhone 15）
 - [ ] ロック中・ポケット内で文字起こしが続くこと（バックグラウンド audio）
-- [ ] 電話割り込み → 「再開」で続きが録れること
+- [ ] 電話割り込み → 通話終了で自動再開（`.shouldResume`）、来なければ「再開」で続きが録れること
+- [ ] 会議中に日誌タブで音声入力しても会議の録音が切れないこと（同じ `AVAudioSession` を共有）
 - [ ] 1 時間連続（SpeechAnalyzer のメモリ・精度、端末の発熱）
 - [ ] 要点の品質（3 見出し固定を 1.5B / Apple が守るか）、300 文字・60 秒の閾値の体感
 - [ ] 前面復帰で未反映分が 1 回で追いつくこと、更新中の「停止」
@@ -184,6 +185,10 @@
 - [ ] `SpeechTranscriber.Result.range` の秒が録音開始基準で取れること（取れなければ受信時刻で代替している）
 
 ### バックログ（初版で見送り）
-- 割り込み終了時の自動再開、イヤホン抜き差し（route change）
+- イヤホン抜き差し（route change）
+- 終了時に要点更新が走っている間に届いた発言は要点に入らない（全文には入る。更新は終了時に最大 1 回）
+- 次の会議で設定変更や権限付与を反映するには画面の再表示が必要な場合がある（`refreshAvailability` は表示時のみ）
+- 60 秒間隔は更新開始時刻基準（更新が 60 秒以上かかると連続実行になりうる）
+- 保存後の「日誌タブへ」導線は未実装（ラベル表示のみ）
 - ユーザーが上にスクロール中の自動追従の抑止（初版は常に末尾へ）
 - 要点テンプレートの選択、同時翻訳（次ステップ）

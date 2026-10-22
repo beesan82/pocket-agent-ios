@@ -9,6 +9,8 @@ import Testing
 final class FakeTranscriptSource: TranscriptSource {
     var reason: SpeechUnavailableReason?
     var failStart = false
+    /// Yielded inside `stop()` before the stream ends (the real capture finalizes its last results then).
+    var finalOnStop: TranscriptSegment?
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var continuation: AsyncStream<TranscriptEvent>.Continuation?
@@ -29,6 +31,7 @@ final class FakeTranscriptSource: TranscriptSource {
 
     func stop() async {
         stopCount += 1
+        if let finalOnStop { continuation?.yield(.final(finalOnStop)) }
         continuation?.finish()
         continuation = nil
     }
@@ -46,7 +49,7 @@ final class TestClock {
 @MainActor
 struct MeetingSessionTests {
     private static let long = String(repeating: "あ", count: 300)
-    private static let notesA = "## 決まったこと\n- A"
+    private static let notesA = "## 決まったこと\n- A\n## 宿題\n- （なし）\n## 論点・未決\n- （なし）"
 
     private func make(
         assistant: FakeJournalAssistant? = FakeJournalAssistant(notesChunks: [Self.notesA]), clock: TestClock = TestClock()
@@ -189,14 +192,14 @@ struct MeetingSessionTests {
     }
 
     @Test func failedUpdateKeepsPreviousNotes() async throws {
-        var assistant = FakeJournalAssistant(notesChunks: ["X"])
+        var assistant = FakeJournalAssistant(notesChunks: [Self.notesA])
         let (session, source, _) = make(assistant: assistant)
         await session.start()
 
         source.yield(.final(TranscriptSegment(offset: 1, text: Self.long)))
         await settle()
         await session.notesTask?.value
-        #expect(session.notes == "X")
+        #expect(session.notes == Self.notesA)
 
         assistant.notesFail = true
         session.assistant = assistant
@@ -206,7 +209,7 @@ struct MeetingSessionTests {
         await session.notesTask?.value
 
         #expect(session.notesPhase == .failed(MeetingSession.notesFailedText))
-        #expect(session.notes == "X")
+        #expect(session.notes == Self.notesA)
         #expect(session.pendingCharacters == 1)
     }
 
@@ -304,6 +307,96 @@ struct MeetingSessionTests {
         await session.start()
 
         #expect(session.state == .failed(MeetingSession.startFailedText))
+    }
+
+    @Test func finishIncludesSegmentsFinalizedByStop() async throws {
+        let (session, source, store) = make(assistant: nil)
+        await session.start()
+        source.yield(.final(TranscriptSegment(offset: 1, text: "最初")))
+        await settle()
+        source.finalOnStop = TranscriptSegment(offset: 9, text: "最後の一言")
+
+        await session.finish()
+
+        #expect(session.state == .saved)
+        #expect(session.segments.count == 2)
+        let saved = try await store.all()
+        #expect(saved.first?.body == "[00:01] 最初\n[00:09] 最後の一言")
+    }
+
+    @Test func longBacklogIsSplitIntoBudgetedBatches() async throws {
+        let assistant = FakeJournalAssistant(notesChunks: [Self.notesA])
+        let (session, source, _) = make(assistant: assistant)
+        session.batchCharacterBudget = 400
+        await session.start()
+        session.setForeground(false)
+        for offset in 1...3 {
+            source.yield(.final(TranscriptSegment(offset: TimeInterval(offset), text: Self.long)))
+        }
+        await settle()
+        #expect(assistant.notesCalls.calls.isEmpty)
+
+        session.setForeground(true)
+        for _ in 0..<3 {
+            await settle()
+            await session.notesTask?.value
+        }
+
+        #expect(assistant.notesCalls.calls.count == 3)
+        #expect(assistant.notesCalls.calls.allSatisfy { $0.newText == Self.long })
+        #expect(session.pendingCharacters == 0)
+        #expect(session.notesPhase == .idle)
+    }
+
+    @Test func truncatedOutputKeepsPreviousNotes() async throws {
+        var assistant = FakeJournalAssistant(notesChunks: [Self.notesA])
+        let (session, source, _) = make(assistant: assistant)
+        await session.start()
+        source.yield(.final(TranscriptSegment(offset: 1, text: Self.long)))
+        await settle()
+        await session.notesTask?.value
+        #expect(session.notes == Self.notesA)
+
+        assistant.notesChunks = ["## 決まったこと\n- B\n## 宿題\n- C"]  // cut off before the third heading
+        session.assistant = assistant
+        source.yield(.final(TranscriptSegment(offset: 2, text: "い")))
+        await settle()
+        session.updateNotesNow()
+        await session.notesTask?.value
+
+        #expect(session.notesPhase == .failed(MeetingSession.notesFailedText))
+        #expect(session.notes == Self.notesA)
+        #expect(session.pendingCharacters == 1)
+    }
+
+    @Test func interruptionEndedResumesRecording() async throws {
+        let (session, source, _) = make(assistant: nil)
+        await session.start()
+        source.yield(.final(TranscriptSegment(offset: 1, text: "発言")))
+        source.yield(.failed(MeetingSession.pausedText))
+        await settle()
+        #expect(session.state == .paused(MeetingSession.pausedText))
+
+        source.yield(.interruptionEnded)
+        source.continuation?.finish()
+        await settle()
+
+        #expect(source.startCount == 2)
+        #expect(session.state == .recording)
+        #expect(session.segments.count == 1)
+    }
+
+    @Test func resetClearsAssistant() async throws {
+        let (session, source, _) = make()
+        await session.start()
+        source.yield(.final(TranscriptSegment(offset: 1, text: "発言")))
+        await settle()
+        await session.finish()
+        #expect(session.modelReady)
+
+        session.reset()
+
+        #expect(session.modelReady == false)
     }
 
     @Test func resetAfterSaveClearsEverything() async throws {

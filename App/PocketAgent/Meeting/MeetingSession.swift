@@ -46,6 +46,10 @@ final class MeetingSession {
     @ObservationIgnored var assistant: (any JournalAssisting)? {
         didSet { beginAutoUpdateIfNeeded() }
     }
+    /// Characters of previous notes + new text one update may carry (the model's context budget);
+    /// a longer backlog (after a locked stretch) is worked through in several updates.
+    @ObservationIgnored var batchCharacterBudget = 3000
+    static let minimumBatchCharacters = 300
 
     @ObservationIgnored private(set) var notesTask: Task<Void, Never>?
 
@@ -55,6 +59,8 @@ final class MeetingSession {
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private var reflectedCount = 0
     @ObservationIgnored private var updatingUpTo: Int?
+    /// The running update left segments behind for the budget; continue at once when it completes.
+    @ObservationIgnored private var batchTruncated = false
     @ObservationIgnored private var lastUpdateStartedAt: Date?
     @ObservationIgnored private var consumeTask: Task<Void, Never>?
     @ObservationIgnored private var captureGeneration = 0
@@ -136,6 +142,10 @@ final class MeetingSession {
         case let .failed(text):
             volatileText = ""
             if state == .recording { state = .paused(text) }
+        case .interruptionEnded:
+            if case .paused = state {
+                Task { await resume() }
+            }
         }
     }
 
@@ -184,8 +194,9 @@ final class MeetingSession {
     }
 
     private func runUpdate() {
-        guard let assistant, notesPhase != .updating else { return }
-        let upTo = segments.count
+        guard let assistant, notesPhase != .updating, reflectedCount < segments.count else { return }
+        let upTo = batchEnd()
+        batchTruncated = upTo < segments.count
         let newText = segments[reflectedCount..<upTo].map(\.text).joined(separator: "\n")
         updatingUpTo = upTo
         lastUpdateStartedAt = now()
@@ -215,19 +226,40 @@ final class MeetingSession {
         }
     }
 
+    /// Segments after `reflectedCount` that fit the budget (at least one).
+    private func batchEnd() -> Int {
+        let budget = max(batchCharacterBudget - notes.count, Self.minimumBatchCharacters)
+        var end = reflectedCount
+        var used = 0
+        for index in reflectedCount..<segments.count {
+            let length = segments[index].text.count
+            if end > reflectedCount, used + length > budget { break }
+            used += length
+            end = index + 1
+        }
+        return end
+    }
+
     private func finishUpdate(raw: String, upTo: Int) {
         notesTask = nil
         updatingUpTo = nil
         draftNotes = ""
+        let continues = batchTruncated
+        batchTruncated = false
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+        // Output cut off by the token limit would silently drop earlier items; keep the previous notes.
+        guard MeetingNotesPolicy.isComplete(text) else {
             notesPhase = .failed(Self.notesFailedText)
             return
         }
         notes = text
         reflectedCount = upTo
         notesPhase = .idle
-        beginAutoUpdateIfNeeded()
+        if continues, isMeetingOpen, isForeground {
+            runUpdate()  // the rest of the backlog, without waiting for the interval
+        } else {
+            beginAutoUpdateIfNeeded()
+        }
     }
 
     // MARK: Finish and save
@@ -239,10 +271,11 @@ final class MeetingSession {
         case .idle, .finishing, .saved, .failed: return
         }
         state = .finishing
-        captureGeneration += 1  // late events of this capture are ignored
+        // Stopping finalizes the last results; they arrive on the events before the stream ends.
         await source.stop()
-        consumeTask?.cancel()
+        await consumeTask?.value
         consumeTask = nil
+        captureGeneration += 1
         volatileText = ""
         if notesPhase != .updating, pendingCharacters > 0, modelReady, isForeground {
             runUpdate()
@@ -284,6 +317,7 @@ final class MeetingSession {
         stopNotesUpdate()
         consumeTask?.cancel()
         consumeTask = nil
+        assistant = nil  // the screen picks the current backend / client again on the next start
         segments = []
         volatileText = ""
         notes = ""

@@ -339,7 +339,7 @@ struct MeetingNotesAssistantTests {
         #expect(call?.messages.first == .system(JournalPrompts.meetingNotesSystem))
         #expect(userText(call).contains("- 旧"))
         #expect(userText(call).contains("新しい発言です"))
-        #expect(call?.extraFields == limits(512))
+        #expect(call?.extraFields == limits(1024))
     }
 
     @Test func updateMeetingNotesWithEmptyPreviousSaysNone() async throws {

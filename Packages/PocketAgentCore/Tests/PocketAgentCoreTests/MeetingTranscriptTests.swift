@@ -48,6 +48,12 @@ struct MeetingTranscriptTests {
         #expect(MeetingNotesPolicy.shouldManualUpdate(pendingCharacters: 1, modelReady: true, isUpdating: true) == false)
     }
 
+    @Test func notesCompletenessRequiresAllThreeHeadings() {
+        #expect(MeetingNotesPolicy.isComplete("## 決まったこと\n- A\n## 宿題\n- （なし）\n## 論点・未決\n- B"))
+        #expect(MeetingNotesPolicy.isComplete("## 決まったこと\n- A\n## 宿題\n- B") == false)
+        #expect(MeetingNotesPolicy.isComplete("") == false)
+    }
+
     @Test func titleUsesMonthDayHourMinute() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "Asia/Tokyo"))

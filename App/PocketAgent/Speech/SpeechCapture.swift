@@ -51,6 +51,10 @@ final class SpeechCapture: TranscriptSource {
     @ObservationIgnored private var events: AsyncStream<TranscriptEvent>.Continuation?
     @ObservationIgnored private var startedAt: Date?
     @ObservationIgnored private var interruptionObserver: (any NSObjectProtocol)?
+    /// True between this capture's session activation and its deactivation (the session is shared).
+    @ObservationIgnored private var holdsSession = false
+    /// Captures holding the shared `AVAudioSession`; it is deactivated when the last one lets go.
+    private static var sessionHolders = 0
 
     func refreshAvailability() async {
         let isAvailable = SpeechTranscriber.isAvailable
@@ -123,7 +127,7 @@ final class SpeechCapture: TranscriptSource {
             self.pipeline = pipeline
             let transcriber = pipeline.transcriber
             resultsTask = Task { [weak self] in await self?.consume(transcriber) }
-            try Self.activateSession()
+            try activateSession()
             try await pipeline.startAnalyzer()
             guard generation == startGeneration, !resultsFailedWhilePreparing else {
                 throw SpeechCaptureError.interrupted
@@ -141,7 +145,7 @@ final class SpeechCapture: TranscriptSource {
                 pipeline = nil
             }
             // A newer start owns the session; only the current (or a stopped, idle) start releases it.
-            if current || state == .idle { Self.deactivateSession() }
+            if current || state == .idle { deactivateSession() }
             guard current else { return stream }  // stop() during preparation is not an error
             state = .failed(Self.startFailedText)
             finishEvents()
@@ -163,7 +167,12 @@ final class SpeechCapture: TranscriptSource {
         case .idle, .recording, .failed:
             break
         }
-        guard let pipeline else { return }
+        guard let pipeline else {
+            // Nothing to release (e.g. after an interruption); the events may still be waiting for `.ended`.
+            stopObservingInterruptions()
+            finishEvents()
+            return
+        }
         let previous = state
         let graceful = previous == .recording
         state = .finishing
@@ -178,7 +187,7 @@ final class SpeechCapture: TranscriptSource {
         resultsTask = nil
         if self.pipeline === pipeline { self.pipeline = nil }
         stopObservingInterruptions()
-        Self.deactivateSession()
+        deactivateSession()
         volatileText = ""
         if state == .finishing { state = graceful ? .idle : previous }
         finishEvents()
@@ -238,17 +247,33 @@ final class SpeechCapture: TranscriptSource {
     }
 
     /// A call or another app's audio ends this capture (the system stops the engine anyway).
-    /// Meeting mode keeps the segments and offers 「再開」; no automatic restart in this version.
+    /// The events stay open until the interruption ends: `.interruptionEnded` when the system
+    /// allows recording again (meeting mode restarts), otherwise the stream just ends.
     private func observeInterruptions() {
         stopObservingInterruptions()
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: .main
         ) { [weak self] notification in
             guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  AVAudioSession.InterruptionType(rawValue: raw) == .began
+                  let type = AVAudioSession.InterruptionType(rawValue: raw)
             else { return }
-            MainActor.assumeIsolated { self?.handleInterruption() }
+            let optionsRaw = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsRaw).contains(.shouldResume)
+            MainActor.assumeIsolated {
+                switch type {
+                case .began: self?.handleInterruption()
+                case .ended: self?.handleInterruptionEnded(shouldResume: shouldResume)
+                @unknown default: break
+                }
+            }
         }
+    }
+
+    private func handleInterruptionEnded(shouldResume: Bool) {
+        guard state == .failed(Self.interruptedText) else { return }
+        stopObservingInterruptions()
+        if shouldResume { events?.yield(.interruptionEnded) }
+        finishEvents()
     }
 
     private func stopObservingInterruptions() {
@@ -263,7 +288,7 @@ final class SpeechCapture: TranscriptSource {
             await cancelPipeline()
             state = .failed(Self.interruptedText)
             events?.yield(.failed(Self.interruptedText))
-            finishEvents()
+            observeInterruptions()  // kept for `.ended`; a new start() or stop() replaces or removes it
         }
     }
 
@@ -278,7 +303,7 @@ final class SpeechCapture: TranscriptSource {
         resultsTask = nil
         pipeline = nil
         stopObservingInterruptions()
-        Self.deactivateSession()
+        deactivateSession()
     }
 
     private static func isJapanese(_ locale: Locale) -> Bool {
@@ -286,14 +311,26 @@ final class SpeechCapture: TranscriptSource {
         return id == "ja" || id.hasPrefix("ja-")
     }
 
-    private static func activateSession() throws {
+    /// The session is shared by every `SpeechCapture` (journal dictation, meeting): activation is
+    /// idempotent, deactivation happens only when the last holder lets go, so a short dictation
+    /// cannot cut off a running meeting.
+    private func activateSession() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement)
         try session.setActive(true)
+        if !holdsSession {
+            holdsSession = true
+            Self.sessionHolders += 1
+        }
     }
 
-    private static func deactivateSession() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    private func deactivateSession() {
+        guard holdsSession else { return }
+        holdsSession = false
+        Self.sessionHolders = max(0, Self.sessionHolders - 1)
+        if Self.sessionHolders == 0 {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 
     // Callbacks below arrive on arbitrary queues; nonisolated + @Sendable keeps them off the main actor.

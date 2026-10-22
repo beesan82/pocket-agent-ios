@@ -54,6 +54,13 @@ public enum MeetingNotesPolicy {
     public static func shouldManualUpdate(pendingCharacters: Int, modelReady: Bool, isUpdating: Bool) -> Bool {
         modelReady && !isUpdating && pendingCharacters >= 1
     }
+
+    public static let requiredHeadings = ["## 決まったこと", "## 宿題", "## 論点・未決"]
+
+    /// Output cut off by the token limit loses its tail; only notes with all three headings replace the previous ones.
+    public static func isComplete(_ notes: String) -> Bool {
+        requiredHeadings.allSatisfy { notes.contains($0) }
+    }
 }
 
 public enum MeetingTitle {
