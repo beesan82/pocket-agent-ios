@@ -25,6 +25,20 @@ final class StreamProbe: @unchecked Sendable {
     }
 }
 
+/// Records `updateMeetingNotes` calls (the fake is a struct, so the log is a shared class).
+final class NotesCallLog: @unchecked Sendable {
+    enum FakeError: Error { case scripted }
+
+    private let lock = NSLock()
+    private var stored: [(previous: String, newText: String)] = []
+
+    var calls: [(previous: String, newText: String)] { lock.withLock { stored } }
+
+    func record(previous: String, newText: String) {
+        lock.withLock { stored.append((previous, newText)) }
+    }
+}
+
 /// Scripted `JournalAssisting` for the app's journal screens.
 struct FakeJournalAssistant: JournalAssisting {
     /// Chunks `summarize` yields; with `hangAfterChunks` the stream then never finishes.
@@ -35,6 +49,26 @@ struct FakeJournalAssistant: JournalAssisting {
     var answerChunks: [String] = []
     /// When set, the stream (summary or answer) yields its chunks, stays open and reports here.
     var probe: StreamProbe?
+    /// Meeting notes: chunks, then finish / fail / stay open. Every call is recorded in `notesCalls`.
+    var notesChunks: [String] = []
+    var notesFail = false
+    var notesHang = false
+    var notesCalls = NotesCallLog()
+
+    func updateMeetingNotes(previous: String, newText: String) -> AsyncThrowingStream<String, Error> {
+        notesCalls.record(previous: previous, newText: newText)
+        let chunks = notesChunks
+        let fail = notesFail
+        let hang = notesHang
+        return AsyncThrowingStream { continuation in
+            for chunk in chunks { continuation.yield(chunk) }
+            if fail {
+                continuation.finish(throwing: NotesCallLog.FakeError.scripted)
+            } else if !hang {
+                continuation.finish()
+            }
+        }
+    }
 
     func summarize(_ text: String) -> AsyncThrowingStream<String, Error> {
         let chunks = summaryChunks

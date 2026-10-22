@@ -1,6 +1,8 @@
 import AVFAudio
+import CoreMedia
 import Foundation
 import Observation
+import PocketAgentCore
 import Speech
 
 enum SpeechCaptureError: Error {
@@ -14,7 +16,7 @@ enum SpeechCaptureError: Error {
 /// Build-only in CI; recording and transcription are verified on a real iPhone.
 @MainActor
 @Observable
-final class SpeechCapture {
+final class SpeechCapture: TranscriptSource {
     enum State: Equatable {
         case idle
         case preparing
@@ -26,6 +28,8 @@ final class SpeechCapture {
     static let startFailedText = "音声入力を開始できませんでした。もう一度お試しください。"
     static let installFailedText = "音声認識データを入手できませんでした。通信環境を確認して再試行してください。"
     static let transcriptionFailedText = "文字起こし中に問題が発生しました。もう一度お試しください。"
+    /// A phone call or another app took the audio session (meeting mode offers 「再開」).
+    static let interruptedText = "録音が中断されました。再開してください。"
 
     private static let japanese = Locale(identifier: "ja_JP")
 
@@ -43,6 +47,10 @@ final class SpeechCapture {
     /// sees a newer value releases its own pipeline and returns.
     @ObservationIgnored private var startGeneration = 0
     @ObservationIgnored private var resultsFailedWhilePreparing = false
+    /// Events of the current capture (`start()` makes a new stream; it ends with the capture).
+    @ObservationIgnored private var events: AsyncStream<TranscriptEvent>.Continuation?
+    @ObservationIgnored private var startedAt: Date?
+    @ObservationIgnored private var interruptionObserver: (any NSObjectProtocol)?
 
     func refreshAvailability() async {
         let isAvailable = SpeechTranscriber.isAvailable
@@ -81,9 +89,12 @@ final class SpeechCapture {
         await refreshAvailability()
     }
 
-    func start() async throws {
+    /// Starts recording and returns this capture's events. A call while a capture is running or
+    /// stopping returns an already-finished stream (the running capture keeps its own).
+    @discardableResult
+    func start() async throws -> AsyncStream<TranscriptEvent> {
         switch state {
-        case .preparing, .recording, .finishing: return
+        case .preparing, .recording, .finishing: return AsyncStream { $0.finish() }
         case .idle, .failed: break
         }
         // Claim the start before any await so a double tap cannot build two pipelines.
@@ -93,10 +104,15 @@ final class SpeechCapture {
         resultsFailedWhilePreparing = false
         volatileText = ""
         finalText = ""
+        let (stream, continuation) = AsyncStream.makeStream(of: TranscriptEvent.self)
+        events?.finish()
+        events = continuation
+        startedAt = Date()
         await refreshAvailability()
-        guard generation == startGeneration else { return }  // stopped meanwhile
+        guard generation == startGeneration else { return stream }  // stopped meanwhile
         guard reason == nil else {
             state = .idle
+            finishEvents()
             throw SpeechCaptureError.unavailable
         }
         var created: AudioPipeline?
@@ -113,7 +129,9 @@ final class SpeechCapture {
                 throw SpeechCaptureError.interrupted
             }
             try pipeline.startEngine()
+            observeInterruptions()
             state = .recording
+            return stream
         } catch {
             if let created { await created.cancel() }
             let current = generation == startGeneration
@@ -124,8 +142,9 @@ final class SpeechCapture {
             }
             // A newer start owns the session; only the current (or a stopped, idle) start releases it.
             if current || state == .idle { Self.deactivateSession() }
-            guard current else { return }  // stop() during preparation is not an error
+            guard current else { return stream }  // stop() during preparation is not an error
             state = .failed(Self.startFailedText)
+            finishEvents()
             throw error
         }
     }
@@ -137,6 +156,7 @@ final class SpeechCapture {
         case .preparing:
             startGeneration += 1  // the running start() releases its own pipeline
             state = .idle
+            finishEvents()
             return
         case .finishing:
             return  // another stop() is finishing
@@ -157,9 +177,24 @@ final class SpeechCapture {
         }
         resultsTask = nil
         if self.pipeline === pipeline { self.pipeline = nil }
+        stopObservingInterruptions()
         Self.deactivateSession()
         volatileText = ""
         if state == .finishing { state = graceful ? .idle : previous }
+        finishEvents()
+    }
+
+    private func finishEvents() {
+        events?.finish()
+        events = nil
+    }
+
+    /// Seconds from the start of this capture for a result; the audio time when the analyzer gives one.
+    private func offset(for range: CMTimeRange) -> TimeInterval {
+        let seconds = range.start.seconds
+        if seconds.isFinite, seconds >= 0 { return seconds }
+        guard let startedAt else { return 0 }
+        return Date().timeIntervalSince(startedAt)
     }
 
     private func consume(_ transcriber: SpeechTranscriber) async {
@@ -170,8 +205,13 @@ final class SpeechCapture {
                 if result.isFinal {
                     finalText += text
                     volatileText = ""
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        events?.yield(.final(TranscriptSegment(offset: offset(for: result.range), text: trimmed)))
+                    }
                 } else {
                     volatileText = text
+                    events?.yield(.volatile(text))
                 }
             }
         } catch {
@@ -185,12 +225,45 @@ final class SpeechCapture {
             // Release engine, analyzer and session first so a later start() begins clean.
             await cancelPipeline()
             state = .failed(Self.transcriptionFailedText)
+            events?.yield(.failed(Self.transcriptionFailedText))
+            finishEvents()
         case .finishing:
             state = .failed(Self.transcriptionFailedText)  // stop() releases the pipeline
+            events?.yield(.failed(Self.transcriptionFailedText))
         case .preparing:
             resultsFailedWhilePreparing = true  // start() aborts before starting the engine
         case .idle, .failed:
             break
+        }
+    }
+
+    /// A call or another app's audio ends this capture (the system stops the engine anyway).
+    /// Meeting mode keeps the segments and offers 「再開」; no automatic restart in this version.
+    private func observeInterruptions() {
+        stopObservingInterruptions()
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: .main
+        ) { [weak self] notification in
+            guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: raw) == .began
+            else { return }
+            MainActor.assumeIsolated { self?.handleInterruption() }
+        }
+    }
+
+    private func stopObservingInterruptions() {
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        interruptionObserver = nil
+    }
+
+    private func handleInterruption() {
+        guard state == .recording else { return }
+        Task { [weak self] in
+            guard let self, state == .recording else { return }
+            await cancelPipeline()
+            state = .failed(Self.interruptedText)
+            events?.yield(.failed(Self.interruptedText))
+            finishEvents()
         }
     }
 
@@ -204,6 +277,7 @@ final class SpeechCapture {
         resultsTask?.cancel()
         resultsTask = nil
         pipeline = nil
+        stopObservingInterruptions()
         Self.deactivateSession()
     }
 

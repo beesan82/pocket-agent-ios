@@ -1,0 +1,69 @@
+import Foundation
+
+/// One final recognition result of a meeting: what was said and when (seconds from the start).
+/// The unit for the notes update and, later, for translation.
+public struct TranscriptSegment: Sendable, Equatable, Identifiable {
+    public let id: UUID
+    public let offset: TimeInterval
+    public let text: String
+
+    public init(id: UUID = UUID(), offset: TimeInterval, text: String) {
+        self.id = id
+        self.offset = offset
+        self.text = text
+    }
+}
+
+public enum MeetingTranscriptFormatter {
+    /// `mm:ss` under an hour, `h:mm:ss` from one hour on; fractions are dropped.
+    public static func timestamp(_ offset: TimeInterval) -> String {
+        let total = max(0, Int(offset))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    /// The whole meeting as `[mm:ss] text` lines (what the journal stores as the transcript).
+    public static func text(_ segments: [TranscriptSegment]) -> String {
+        segments.map { "[\(timestamp($0.offset))] \($0.text)" }.joined(separator: "\n")
+    }
+}
+
+/// When the meeting notes are (re)generated from the transcript.
+public enum MeetingNotesPolicy {
+    public static let minPendingCharacters = 300
+    public static let minInterval: TimeInterval = 60
+
+    /// Automatic update: enough new text, not too soon after the last update (none yet counts as
+    /// long enough), the app in front, a usable model, and no update running.
+    public static func shouldAutoUpdate(
+        pendingCharacters: Int, secondsSinceLastUpdate: TimeInterval?, isForeground: Bool,
+        modelReady: Bool, isUpdating: Bool
+    ) -> Bool {
+        guard isForeground, modelReady, !isUpdating else { return false }
+        guard pendingCharacters >= minPendingCharacters else { return false }
+        if let secondsSinceLastUpdate, secondsSinceLastUpdate < minInterval { return false }
+        return true
+    }
+
+    /// The 「更新」 button: anything new, a usable model, and no update running.
+    public static func shouldManualUpdate(pendingCharacters: Int, modelReady: Bool, isUpdating: Bool) -> Bool {
+        modelReady && !isUpdating && pendingCharacters >= 1
+    }
+}
+
+public enum MeetingTitle {
+    /// `会議 M/d HH:mm` in the calendar's time zone.
+    public static func make(start: Date, calendar: Calendar = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "M/d HH:mm"
+        return "会議 " + formatter.string(from: start)
+    }
+}

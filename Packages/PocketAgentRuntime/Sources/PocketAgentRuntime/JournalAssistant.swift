@@ -18,6 +18,8 @@ public struct AskResult: Sendable {
 public protocol JournalAssisting: Sendable {
     func summarize(_ text: String) -> AsyncThrowingStream<String, Error>
     func ask(_ question: String, store: any JournalStore) async throws -> AskResult
+    /// Meeting notes rewritten from the previous notes and the transcript since then (full replacement).
+    func updateMeetingNotes(previous: String, newText: String) -> AsyncThrowingStream<String, Error>
 }
 
 /// Journal features on top of any `LLMClient` (an on-device client in the app: MLX or Apple).
@@ -50,6 +52,15 @@ public struct JournalAssistant: JournalAssisting {
             ))
         ]
         return StreamBridge.contentOnly(client.stream(messages: messages, tools: [], requestContext: LocalGeneration.requestContext(maxTokens: 512)))
+    }
+
+    public func updateMeetingNotes(previous: String, newText: String) -> AsyncThrowingStream<String, Error> {
+        let messages: [ChatMessage] = [
+            .system(JournalPrompts.meetingNotesSystem),
+            .user(JournalPrompts.meetingNotesUser(previous: previous, newText: newText))
+        ]
+        return StreamBridge.contentOnly(
+            client.stream(messages: messages, tools: [], requestContext: LocalGeneration.requestContext(maxTokens: 512)))
     }
 
     public func ask(_ question: String, store: any JournalStore) async throws -> AskResult {

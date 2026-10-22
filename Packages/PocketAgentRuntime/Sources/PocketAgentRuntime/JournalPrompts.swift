@@ -26,6 +26,22 @@ public enum JournalPrompts {
         "質問: \(question)"
     }
 
+    public static let meetingNotesSystem = """
+    あなたは会議の書記です。「これまでの要点」と「新しい発言」から、要点を更新して全文を出力してください。
+    - 見出しは次の 3 つだけを、この順で必ず書く: 「## 決まったこと」「## 宿題」「## 論点・未決」。
+    - 各見出しの下は「- 」で始まる箇条書き。各見出し最大 7 項目。該当がなければ「- （なし）」と書く。
+    - 宿題は「- 内容（担当: 〇〇、期限: 〇〇）」の形。担当や期限が分からなければその部分は省く。
+    - 固有名詞・数字・日時は省かない。発言に無いことは書かない。
+    - これまでの要点にある項目は、新しい発言で変わらない限り残す。
+    - 前置き・説明・出力以外の文は書かない。
+    """
+
+    public static func meetingNotesUser(previous: String, newText: String) -> String {
+        let trimmed = previous.trimmingCharacters(in: .whitespacesAndNewlines)
+        let previousBlock = trimmed.isEmpty ? "これまでの要点: （まだありません）" : "これまでの要点:\n\(trimmed)"
+        return "\(previousBlock)\n\n新しい発言:\n\(newText)\n\n要点を更新して全文を出力してください。"
+    }
+
     public static let answerSystem = """
     あなたは日誌の内容に答える係です。与えられた日誌だけを根拠に、日本語で答えてください。
     - 日誌に答えが書かれていなければ「日誌に記録がありません」と答える。

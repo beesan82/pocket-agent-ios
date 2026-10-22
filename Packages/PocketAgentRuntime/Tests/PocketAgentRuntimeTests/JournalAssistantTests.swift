@@ -324,3 +324,31 @@ struct JournalAssistantTests {
         #expect(prompt.contains("--- 日誌 (2026-10-20 08:05) ---\n散歩した"))
     }
 }
+
+struct MeetingNotesAssistantTests {
+    @Test func updateMeetingNotesSendsPreviousAndNewAndContentOnly() async throws {
+        let client = ScriptedTextClient(
+            generate: [], stream: [.deltas([.content("## 決まったこと\n- A"), .content("\n## 宿題\n- B")])])
+        let assistant = makeAssistant(client)
+
+        let chunks = try await collect(assistant.updateMeetingNotes(previous: "## 決まったこと\n- 旧", newText: "新しい発言です"))
+
+        #expect(chunks.joined() == "## 決まったこと\n- A\n## 宿題\n- B")
+        let call = client.calls.first
+        #expect(call?.kind == .stream)
+        #expect(call?.messages.first == .system(JournalPrompts.meetingNotesSystem))
+        #expect(userText(call).contains("- 旧"))
+        #expect(userText(call).contains("新しい発言です"))
+        #expect(call?.extraFields == limits(512))
+    }
+
+    @Test func updateMeetingNotesWithEmptyPreviousSaysNone() async throws {
+        let client = ScriptedTextClient(generate: [], stream: [.deltas([.content("x")])])
+        let assistant = makeAssistant(client)
+
+        _ = try await collect(assistant.updateMeetingNotes(previous: "", newText: "はじめの発言"))
+
+        #expect(userText(client.calls.first).contains("まだありません"))
+        #expect(userText(client.calls.first).contains("はじめの発言"))
+    }
+}
