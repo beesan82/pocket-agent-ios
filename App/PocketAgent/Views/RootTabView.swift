@@ -1,7 +1,7 @@
 import PocketAgentCore
 import SwiftUI
 
-/// Root tabs: 日誌 (home), 聞く, チャット. Each tab has its own navigation stack.
+/// Root tabs: 日誌 (home), 聞く, 会議, チャット. Each tab has its own navigation stack.
 struct RootTabView: View {
     let settings: ModelSettings
     let credentials: any CredentialStore
@@ -13,6 +13,8 @@ struct RootTabView: View {
     let tokenStore: any CredentialStore
     /// The app's single journal store, shared by every screen.
     let journal: any JournalStore
+    /// The one meeting: it keeps recording when the user leaves this tab.
+    let meeting: MeetingSession
 
     @State private var chatPath = NavigationPath()
 
@@ -30,6 +32,14 @@ struct RootTabView: View {
                 NavigationStack {
                     AskJournalView(
                         journal: journal, settings: settings, availability: availability,
+                        mlxStore: mlxStore, mlxRuntime: mlxRuntime,
+                        measurementLog: measurementLog, settingsView: settingsView)
+                }
+            }
+            Tab("会議", systemImage: "waveform") {
+                NavigationStack {
+                    MeetingView(
+                        meeting: meeting, settings: settings, availability: availability,
                         mlxStore: mlxStore, mlxRuntime: mlxRuntime,
                         measurementLog: measurementLog, settingsView: settingsView)
                 }

@@ -78,7 +78,9 @@ AgentApp/
 ├─ App/
 │  ├─ PocketAgent/              アプリ本体（SwiftUI）
 │  │  ├─ PocketAgentApp.swift
-│  │  ├─ Views/
+│  │  ├─ Views/                 画面（MeetingView = 会議タブ）
+│  │  ├─ Meeting/               MeetingSession（会議の状態: セグメント・要点・保存。アプリで 1 つ）
+│  │  ├─ Speech/                SpeechCapture（SpeechAnalyzer）、TranscriptSource
 │  │  └─ Adapters/              AgentRunKit 依存コード
 │  └─ PocketAgentTests/         アプリ側ユニットテスト（XCTest/Swift Testing）
 ├─ Packages/

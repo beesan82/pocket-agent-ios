@@ -9,6 +9,8 @@ struct PocketAgentApp: App {
     @State private var container: ModelContainer?
     /// The one journal store for the app (a second instance could hand out duplicate sequences).
     @State private var journal: SwiftDataJournalStore?
+    /// The one meeting session (recording survives tab changes and locking).
+    @State private var meeting: MeetingSession?
     private let credentials: KeychainCredentialStore
     private let availability = AppleLocalAvailability()
     private let measurementLog: MeasurementLog
@@ -41,16 +43,18 @@ struct PocketAgentApp: App {
             try? NoteMigration.migrateOnce(context: container.mainContext, defaults: .standard)
         }
         _container = State(initialValue: container)
-        _journal = State(initialValue: container.map { SwiftDataJournalStore(modelContainer: $0) })
+        let journal = container.map { SwiftDataJournalStore(modelContainer: $0) }
+        _journal = State(initialValue: journal)
+        _meeting = State(initialValue: journal.map { MeetingSession(source: SpeechCapture(), store: $0, assistant: nil) })
     }
 
     var body: some Scene {
         WindowGroup {
-            if let container, let journal {
+            if let container, let journal, let meeting {
                 ContentView(
                     settings: settings, credentials: credentials, availability: availability,
                     mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
-                    developer: developer, tokenStore: tokenStore, journal: journal)
+                    developer: developer, tokenStore: tokenStore, journal: journal, meeting: meeting)
                     .modelContainer(container)
                     .environment(downloadFlow)
                     // The only presenter of the download / delete confirmations.

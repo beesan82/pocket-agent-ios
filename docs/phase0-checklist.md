@@ -164,3 +164,26 @@
 - ダウンロード後も「設定でダウンロードする」リンクが次の送信まで残る
 - 1 回の返答中にメモリ解放→再読み込みされた場合は検出しない
 - `ModelSettings` の移行でキー読み出し失敗時のログなし（次回起動で再試行）
+
+## 会議モード（リアルタイム文字起こし + 随時要点、ADR-033/034）
+設計: `docs/superpowers/specs/2026-10-19-meeting-mode-design.md` / 計画: `docs/superpowers/plans/2026-10-19-meeting-mode.md`
+
+### 実装済み（CI で自動テスト合格）
+- Core: `TranscriptSegment`、`MeetingTranscriptFormatter`（`[mm:ss]`／`h:mm:ss`）、`MeetingNotesPolicy`（300 文字・60 秒）、`MeetingTitle`
+- Runtime: `JournalAssisting.updateMeetingNotes(previous:newText:)` と `JournalPrompts.meetingNotes*`（3 見出し固定）
+- App: `TranscriptSource` / `TranscriptEvent`、`SpeechCapture` の確定セグメントのイベントストリームと割り込み検知、`MeetingSession`、「会議」タブ（`MeetingView`）、`UIBackgroundModes: audio`
+
+### 実機で未検証（iPhone 15）
+- [ ] ロック中・ポケット内で文字起こしが続くこと（バックグラウンド audio）
+- [ ] 電話割り込み → 「再開」で続きが録れること
+- [ ] 1 時間連続（SpeechAnalyzer のメモリ・精度、端末の発熱）
+- [ ] 要点の品質（3 見出し固定を 1.5B / Apple が守るか）、300 文字・60 秒の閾値の体感
+- [ ] 前面復帰で未反映分が 1 回で追いつくこと、更新中の「停止」
+- [ ] 録音中のモデル読み込みでメモリ警告が出ないこと（音声 + MLX の同居）
+- [ ] 終了 → 日誌に「会議 M/d HH:mm」で保存され、「聞く」から検索できること
+- [ ] `SpeechTranscriber.Result.range` の秒が録音開始基準で取れること（取れなければ受信時刻で代替している）
+
+### バックログ（初版で見送り）
+- 割り込み終了時の自動再開、イヤホン抜き差し（route change）
+- ユーザーが上にスクロール中の自動追従の抑止（初版は常に末尾へ）
+- 要点テンプレートの選択、同時翻訳（次ステップ）

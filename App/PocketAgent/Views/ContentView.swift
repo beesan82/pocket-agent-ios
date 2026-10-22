@@ -12,11 +12,18 @@ struct ContentView: View {
     let developer: DeveloperSettings
     let tokenStore: any CredentialStore
     let journal: any JournalStore
+    let meeting: MeetingSession
+
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         RootTabView(
             settings: settings, credentials: credentials, availability: availability,
             mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
-            developer: developer, tokenStore: tokenStore, journal: journal)
+            developer: developer, tokenStore: tokenStore, journal: journal, meeting: meeting)
+            // Watched here, not in the meeting tab: notes catch up on return whichever tab is open.
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                meeting.setForeground(phase == .active)
+            }
     }
 }

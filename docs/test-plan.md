@@ -18,5 +18,13 @@
 | AT-14 ローカル通信 | Unit + 実機 | `ModelBackendResolverTests.appleLocalNeverReadsKeyOrBuildsClaude`、`LLMClientFactoryTests.appleLocalBuildsFoundationModelsClientWithoutTouchingKey`（キー読み出し 0 回・`AnthropicClient` 非生成）、日誌: `JournalPersistenceTests.noteToolsSeeOnlyNoteToolEntries`（Claude のノートツールは `.noteTool` のみ参照、ADR-021）、読み込みはローカルディレクトリのみ（ADR-023） | CI / 実機 | **Unit 合格（run 39284990942）**。Apple 経路のチャット（`ChatSessionTests.appleLocalSecondTurnSendsOneFoldedPrompt`）も会話をクラウドへ送らない構成を維持。機内モードでの実機確認は未検証 |
 | AT-15 MLX | Unit + 実機 | `MLXModelStoreTests`（`downloadRefusedWhenDiskTooSmall` / `downloadProgressAndCompletion` / `cancelLeavesNotDownloaded` / `downloadFailureShowsFixedText`）、`SDKLinkCheckTests.mlxClientIsLinked`、日誌の要約・質問・保存の各テスト（Core 68 / Runtime 64 / App 112） | CI / 実機 | **Unit 合格（run 39284990942）**。実機: Qwen2.5-1.5B の要約は短文 3.0 秒 / 中文 6.0 秒 / 長文 12.0 秒、メモリ警告なし（2026-10-19、ビルド 5、`docs/phase2-mlx-eval.md`）。日誌画面の通し操作・質問・機内モードは未検証（`docs/phase0-checklist.md` Phase 2 節） |
 
+## 会議モード（FR-11 / FR-14 / FR-15、ADR-033/034）
+| 項目 | 自動化手段 | 状態 |
+|---|---|---|
+| セグメント整形・更新条件・見出し | `MeetingTranscriptTests` | Unit（CI） |
+| 要点プロンプト（前回 + 新規、本文のみ、max_tokens 512） | `MeetingNotesAssistantTests` | Unit（CI） |
+| 閾値・前面復帰・更新中の到着分・失敗時の保持・終了時の保存形式・0 件で保存しない・失敗→一時停止→再開 | `MeetingSessionTests` | Unit（CI） |
+| ロック中の継続、割り込み後の再開、1 時間連続、要点品質、メモリ | 実機（iPhone 15、TestFlight） | 未検証（`docs/phase0-checklist.md` 会議モード節） |
+
 ## 実機記録テンプレート
 機種 / iOS / RAM / モデル名・量子化 / 操作 / 所要時間 / 結果 / 備考
