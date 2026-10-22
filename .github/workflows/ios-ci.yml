@@ -119,6 +119,17 @@ jobs:
 
   # THROWAWAY: spike/fm-harness only (design 2026-10-19 "第2段階の入口"). Builds the separate
   # FMHarness app (ClaudeForFoundationModels 0.2.3 + mlx-swift-lm 3.32.3 MLXFoundationModels).
+  spike-spm-probe:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.x
+        run: bash ci/select-xcode.sh
+      - name: Resolve AgentRunKit 6.1.0 + mlx-swift-lm 3.32.3
+        working-directory: spike/spm-probe
+        run: swift package resolve 2>&1 | tail -40; cat Package.resolved 2>/dev/null | grep -E '"identity"|"version"' || true
+
   spike-fm-harness:
     runs-on: xcode-27
     timeout-minutes: 45
