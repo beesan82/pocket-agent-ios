@@ -21,8 +21,9 @@ struct ConversationListView: View {
     var body: some View {
         List {
             if conversations.isEmpty {
-                Text("会話はまだありません。「新しい会話」から始めましょう。")
+                Text("会話はまだありません。")
                     .foregroundStyle(.secondary)
+                Button("新しい会話を始める", systemImage: "square.and.pencil") { create() }
             }
             ForEach(conversations) { conversation in
                 NavigationLink(value: conversation) {
@@ -57,7 +58,8 @@ struct ConversationListView: View {
                 }
                 .accessibilityLabel("設定")
             }
-            ToolbarItem(placement: .bottomBar) {
+            // Not .bottomBar: inside the TabView the tab bar hides bottom-bar items.
+            ToolbarItem(placement: .topBarTrailing) {
                 Button("新しい会話", systemImage: "square.and.pencil") { create() }
             }
         }
