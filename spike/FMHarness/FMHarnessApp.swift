@@ -83,6 +83,10 @@ struct SpikeView: View {
                         startAllExperiments(only: [.foldChat, .foldTool])
                     }
                     .disabled(running != nil)
+                    Button("D3 だけ実行（D3a・D3b × 既定・greedy）") {
+                        startAllExperiments(only: [.foldToolUserOnly, .foldToolFact])
+                    }
+                    .disabled(running != nil)
                     Button("結果だけコピー（400字以内）") { UIPasteboard.general.string = log.summaryText }
                     if !log.summaries.isEmpty {
                         Text(log.summaryText).font(.caption.monospaced())

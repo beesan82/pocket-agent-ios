@@ -23,6 +23,8 @@ enum Experiment: String, CaseIterable, Identifiable {
     case afterTool = "C: ツール保存の後の2ターン目"
     case foldChat = "D1: 雑談を文字で畳み込んだ新セッション"
     case foldTool = "D2: ツール保存を文字で畳み込んだ新セッション"
+    case foldToolUserOnly = "D3a: ツール保存の後、ユーザー発言だけ畳み込み"
+    case foldToolFact = "D3b: ツール保存の後、返答を短い事実に置き換えて畳み込み"
     var id: String { rawValue }
     var short: String { String(rawValue.prefix { $0 != ":" }) }
 
@@ -31,24 +33,32 @@ enum Experiment: String, CaseIterable, Identifiable {
         switch self {
         case .single: nil
         case .afterChat, .foldChat: "こんにちは。今日はいい天気ですね。"
-        case .afterTool, .foldTool: "私の名前はケイタ 覚えておいて"
+        case .afterTool, .foldTool, .foldToolUserOnly, .foldToolFact: "私の名前はケイタ 覚えておいて"
         }
     }
 
     /// D: the warmup runs in its own session; the measured turn gets a fresh session whose
     /// prompt carries the earlier exchange as plain text (like Pocket Agent's Apple-local fold).
-    var folds: Bool { self == .foldChat || self == .foldTool }
+    var folds: Bool { [.foldChat, .foldTool, .foldToolUserOnly, .foldToolFact].contains(self) }
+    var savesFirst: Bool { [.afterTool, .foldTool, .foldToolUserOnly, .foldToolFact].contains(self) }
+
+    /// What stands in for the assistant's 1st reply in the fold (nil = omit the line).
+    /// D3 keeps the reply text ("メモを保存しました: …") out of the prompt, since the model copies it.
+    func foldedAssistant(reply: String, toolCalled: Bool) -> String? {
+        switch self {
+        case .foldToolUserOnly: nil
+        case .foldToolFact: toolCalled ? "（前の依頼は処理済み）" : "（前の依頼は処理されていない）"
+        default: reply
+        }
+    }
 
     static let measuredPrompt = "牛乳を覚えておいて"
 
-    static func folded(user: String, assistant: String, current: String) -> String {
-        """
-        これまでの会話（参考。ここに書かれた操作は実行済みとは限らない）:
-        ユーザー: \(user)
-        アシスタント: \(assistant)
-
-        今回のユーザーの発言: \(current)
-        """
+    static func folded(user: String, assistant: String?, current: String) -> String {
+        var lines = ["これまでの会話（参考。ここに書かれた操作は実行済みとは限らない）:", "ユーザー: \(user)"]
+        if let assistant { lines.append("アシスタント: \(assistant)") }
+        lines += ["", "今回のユーザーの発言: \(current)"]
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -68,7 +78,7 @@ func runExperiment(
 ) async {
     var called = 0
     var finished = 0
-    var warmupCalled = 0  // C / D2: the 1st turn's save_note succeeded
+    var warmupCalled = 0  // C / D2 / D3: the 1st turn's save_note succeeded
     var faked = 0  // reply says 保存 without a tool call
     var textCalls = 0  // the call was written into the reply text instead of a real tool call
     log.add("実験 \(experiment.rawValue) / \(sampling.rawValue) / \(backend.rawValue) × \(trials)")
@@ -79,11 +89,15 @@ func runExperiment(
             var prompt = Experiment.measuredPrompt
             if let warmup = experiment.warmup {
                 let first = try await session.respond(to: warmup, options: sampling.options)
-                if toolCallCount(session) > 0 { warmupCalled += 1 }
+                let firstCalled = toolCallCount(session) > 0
+                if firstCalled { warmupCalled += 1 }
                 log.add("  #\(trial) 1ターン目 ← \(first.content)")
                 if experiment.folds {
                     session = try makeSession(backend, tools: makeTools(), clientID: clientID)
-                    prompt = Experiment.folded(user: warmup, assistant: first.content, current: prompt)
+                    prompt = Experiment.folded(
+                        user: warmup,
+                        assistant: experiment.foldedAssistant(reply: first.content, toolCalled: firstCalled),
+                        current: prompt)
                 }
             }
             let before = toolCallCount(session)
@@ -105,8 +119,8 @@ func runExperiment(
     }
     // e.g. "C既 呼0/5 偽2 文1 初3"
     // 呼 = tool called, 偽 = claims saved without calling, 文 = call written as text,
-    // 初 = (C / D2) 1st-turn save succeeded
+    // 初 = (C / D2 / D3) 1st-turn save succeeded
     var line = "\(experiment.short)\(sampling.short) 呼\(called)/\(finished) 偽\(faked) 文\(textCalls)"
-    if experiment == .afterTool || experiment == .foldTool { line += " 初\(warmupCalled)" }
+    if experiment.savesFirst { line += " 初\(warmupCalled)" }
     log.addSummary(line)
 }
