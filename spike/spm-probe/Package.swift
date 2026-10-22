@@ -7,7 +7,7 @@ let package = Package(
     name: "Probe",
     platforms: [.iOS("27.0"), .macOS("27.0")],
     dependencies: [
-        .package(url: "https://github.com/Tom-Ryder/AgentRunKit.git", exact: "6.1.0"),
+        .package(url: "https://github.com/beesan82/AgentRunKit.git", exact: "6.1.0-pocket.1"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", exact: "3.32.3"),
     ],
     targets: [

@@ -128,7 +128,11 @@ jobs:
         run: bash ci/select-xcode.sh
       - name: Resolve AgentRunKit 6.1.0 + mlx-swift-lm 3.32.3
         working-directory: spike/spm-probe
-        run: swift package resolve 2>&1 | tail -40; cat Package.resolved 2>/dev/null | grep -E '"identity"|"version"' || true
+        run: |
+          set -o pipefail
+          swift package resolve 2>&1 | tail -40
+          grep -E '"identity"|"version"' Package.resolved
+          swift build --target Probe 2>&1 | tail -20
 
   spike-fm-harness:
     runs-on: xcode-27
