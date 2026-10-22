@@ -63,28 +63,40 @@ jobs:
           brew install xcodegen
           xcodegen --version
           xcodegen generate
-          # XcodeGen does not manage Package.resolved: seed the app with the committed pins
-          # (same remote graph as PocketAgentRuntime) so transitive versions stay fixed.
+          # XcodeGen does not manage Package.resolved: seed the app with its committed pins
+          # (App/Package.resolved: the app graph, a superset of PocketAgentRuntime's) so versions stay fixed.
           mkdir -p PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
-          cp Packages/PocketAgentRuntime/Package.resolved \
-            PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          if [ -f App/Package.resolved ]; then
+            cp App/Package.resolved PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          else
+            echo "::warning::App/Package.resolved missing: resolving fresh (bootstrap; commit the artifact)"
+          fi
 
       - name: Resolve packages
         if: ${{ !inputs.packages_only }}
         run: |
-          xcodebuild -resolvePackageDependencies -project PocketAgent.xcodeproj -scheme PocketAgent
+          xcodebuild -resolvePackageDependencies -project PocketAgent.xcodeproj -scheme PocketAgent             -skipMacroValidation -skipPackagePluginValidation
           # Location varies with Xcode version / local packages; log whatever exists, never fail here.
           find . -name Package.resolved -not -path '*/.build/*' -print -exec cat {} \; || true
-          # Fail if resolution drifted from the committed pins (ADR-002).
+          # Fail if resolution drifted from the committed pins (ADR-002): the app's own file must match
+          # exactly, and every package PocketAgentRuntime also pins must be at the same revision.
           python3 - <<'EOF'
-          import json
+          import json, os
           def pins(path):
               return {p["identity"]: p["state"].get("revision") for p in json.load(open(path))["pins"]}
-          committed = pins("Packages/PocketAgentRuntime/Package.resolved")
           app = pins("PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
-          drift = {k: (committed.get(k), app.get(k)) for k in committed.keys() | app.keys() if committed.get(k) != app.get(k)}
-          if drift:
-              raise SystemExit(f"::error::Package pins drifted: {drift}")
+          problems = {}
+          if os.path.exists("App/Package.resolved"):
+              committed = pins("App/Package.resolved")
+              problems.update({k: (committed.get(k), app.get(k)) for k in committed.keys() | app.keys() if committed.get(k) != app.get(k)})
+          else:
+              print("::warning::no App/Package.resolved to compare (bootstrap)")
+          runtime_path = "Packages/PocketAgentRuntime/Package.resolved"
+          if os.path.exists(runtime_path):
+              runtime = pins(runtime_path)
+              problems.update({k: (runtime[k], app.get(k)) for k in runtime if runtime[k] != app.get(k)})
+          if problems:
+              raise SystemExit(f"::error::Package pins drifted: {problems}")
           print(f"pins match ({len(app)} packages)")
           EOF
 
@@ -95,13 +107,14 @@ jobs:
           xcodebuild build \
             -project PocketAgent.xcodeproj -scheme PocketAgent \
             -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO | tee build.log
 
       - name: Build (iOS device, unsigned)
         if: ${{ !inputs.packages_only }}
         run: |
           set -o pipefail
-          xcodebuild build             -project PocketAgent.xcodeproj -scheme PocketAgent             -destination 'generic/platform=iOS'             CODE_SIGNING_ALLOWED=NO | tee build-device.log
+          xcodebuild build             -project PocketAgent.xcodeproj -scheme PocketAgent             -destination 'generic/platform=iOS'             -skipMacroValidation -skipPackagePluginValidation             CODE_SIGNING_ALLOWED=NO | tee build-device.log
 
       - name: Unit tests (iOS Simulator)
         if: ${{ !inputs.packages_only }}
@@ -115,6 +128,7 @@ jobs:
           xcodebuild test \
             -project PocketAgent.xcodeproj -scheme PocketAgent \
             -destination "id=$DEST_ID" \
+            -skipMacroValidation -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= | tee test.log
 
       - name: Upload Package.resolved and logs

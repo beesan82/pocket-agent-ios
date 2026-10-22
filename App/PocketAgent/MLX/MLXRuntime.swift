@@ -1,49 +1,53 @@
 import AgentRunKit
 import Foundation
-import Observation
-import UIKit
-#if !targetEnvironment(simulator)
-import AgentRunKitMLX
-import Hub
-import MLX
+import FoundationModels
+import MLXFoundationModels
+import MLXHuggingFace
+import MLXLLM
 import MLXLMCommon
-#endif
+import Observation
+import Tokenizers
+import UIKit
+
+/// A loaded on-device model: text generation for the journal, and the Foundation Models model
+/// for chat (nil in test doubles). `release` frees it; it is called once, when the model is dropped.
+struct LoadedOnDeviceModel: Sendable {
+    let textClient: any LLMClient
+    let languageModel: (any OnDeviceLanguageModel)?
+    let release: @Sendable () -> Void
+}
 
 protocol ModelLoading: Sendable {
     /// Loads from the local model directory only (never downloads).
-    func load(_ model: MLXModelInfo, directory: URL) async throws -> any LLMClient
-    /// Frees cached GPU buffers after the client has been dropped.
-    func releaseMemory()
+    func load(_ model: MLXModelInfo, directory: URL) async throws -> LoadedOnDeviceModel
 }
 
 /// Thrown when the model directory has no `config.json` (never downloads to recover).
 struct MLXModelFilesMissing: Error {}
 
-/// Real loader. On the simulator it never touches MLX or Hub.
+/// Real loader: `MLXLanguageModel` (mlx-swift-lm 3.32.3 MLXFoundationModels) over the local
+/// directory. On the simulator it never touches MLX.
 struct MLXModelLoader: ModelLoading {
-    func load(_ model: MLXModelInfo, directory: URL) async throws -> any LLMClient {
+    func load(_ model: MLXModelInfo, directory: URL) async throws -> LoadedOnDeviceModel {
         #if targetEnvironment(simulator)
         throw MLXUnsupportedOnSimulator()
         #else
         guard FileManager.default.fileExists(
             atPath: directory.appending(path: "config.json").path(percentEncoded: false))
         else { throw MLXModelFilesMissing() }
-        Memory.cacheLimit = 64 * 1024 * 1024
-        // A directory configuration skips `hub.snapshot` (mlx-swift-lm 2.30.6 `downloadModel` returns the
-        // directory as-is; the tokenizer is read with `LanguageModelConfigurationFromHub(modelFolder:)`).
-        let container = try await loadModelContainer(
-            hub: HubApi(useOfflineMode: true),
+        // Weights and tokenizer come from the downloaded directory only: no Hub request (ADR-023).
+        let languageModel = MLXLanguageModel(
             configuration: ModelConfiguration(directory: directory),
-            progressHandler: { _ in })
-        return MLXClient(
-            container: container, model: model.id,
-            parameters: GenerateParameters(temperature: 0.7, topP: 0.8, repetitionPenalty: 1.1))
-        #endif
-    }
-
-    func releaseMemory() {
-        #if !targetEnvironment(simulator)
-        Memory.clearCache()
+            capabilities: [.toolCalling],
+            weightsLocation: { _ in directory },
+            load: { _, _ in
+                try await loadModelContainer(from: directory, using: #huggingFaceTokenizerLoader())
+            })
+        try await languageModel.preload()
+        return LoadedOnDeviceModel(
+            textClient: FoundationModelsTextClient(model: languageModel),
+            languageModel: languageModel,
+            release: { Task { await languageModel.evict() } })
         #endif
     }
 }
@@ -64,13 +68,16 @@ final class MLXRuntime {
 
     private(set) var state: State = .idle
     private(set) var client: (any LLMClient)?
+    /// The loaded model for on-device chat (Foundation Models session with tools).
+    private(set) var languageModel: (any OnDeviceLanguageModel)?
     private(set) var loadedModelID: String?
     private(set) var lastLoadSeconds: Double?
 
     @ObservationIgnored private let store: MLXModelStore
     @ObservationIgnored private let loader: any ModelLoading
     @ObservationIgnored private var generation = 0
-    @ObservationIgnored private var loadTask: Task<Result<any LLMClient, any Error>, Never>?
+    @ObservationIgnored private var loadTask: Task<Result<LoadedOnDeviceModel, any Error>, Never>?
+    @ObservationIgnored private var releaseLoaded: (@Sendable () -> Void)?
     @ObservationIgnored private var loadingModelID: String?
     @ObservationIgnored private var memoryObserver: ObserverToken?
 
@@ -111,7 +118,7 @@ final class MLXRuntime {
         let loader = loader
         let directory = HubModelDownloader.directory(of: model, at: store.baseDirectory)
         let start = ContinuousClock.now
-        let task = Task<Result<any LLMClient, any Error>, Never> {
+        let task = Task<Result<LoadedOnDeviceModel, any Error>, Never> {
             do {
                 return .success(try await loader.load(model, directory: directory))
             } catch {
@@ -123,14 +130,16 @@ final class MLXRuntime {
 
         guard current == generation else {
             // Cancelled or superseded: a container that loaded anyway is dropped here.
-            if case .success = result { loader.releaseMemory() }
+            if case let .success(late) = result { late.release() }
             return
         }
         loadTask = nil
         loadingModelID = nil
         switch result {
         case let .success(loaded):
-            client = loaded
+            client = loaded.textClient
+            languageModel = loaded.languageModel
+            releaseLoaded = loaded.release
             loadedModelID = model.id
             lastLoadSeconds = Self.seconds(ContinuousClock.now - start)
             state = .loaded
@@ -165,10 +174,12 @@ final class MLXRuntime {
     }
 
     private func dropClient() {
-        let hadClient = client != nil
+        let release = releaseLoaded
         client = nil
+        languageModel = nil
+        releaseLoaded = nil
         loadedModelID = nil
-        if hadClient { loader.releaseMemory() }
+        release?()
     }
 
     private static func seconds(_ duration: Duration) -> Double {

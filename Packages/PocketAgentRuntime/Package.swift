@@ -10,7 +10,8 @@ let package = Package(
         .library(name: "PocketAgentRuntime", targets: ["PocketAgentRuntime"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Tom-Ryder/AgentRunKit.git", exact: "6.1.0"),
+        // Fork of 6.1.0 without AgentRunKitMLX (ADR-035).
+        .package(url: "https://github.com/beesan82/AgentRunKit.git", exact: "6.1.0-pocket.1"),
         .package(path: "../PocketAgentCore")
     ],
     targets: [

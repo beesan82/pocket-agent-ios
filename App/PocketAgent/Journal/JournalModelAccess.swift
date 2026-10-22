@@ -1,5 +1,5 @@
 import AgentRunKit
-import AgentRunKitFoundationModels
+import FoundationModels
 import PocketAgentCore
 import PocketAgentRuntime
 import SwiftUI
@@ -62,7 +62,7 @@ enum JournalModelAccess {
 
     /// No tools: the journal sends single-turn system + user prompts.
     private static func appleClient() -> any LLMClient {
-        FoundationModelsClient<EmptyContext>(tools: [], context: EmptyContext())
+        FoundationModelsTextClient(model: SystemLanguageModel.default)
     }
 
     static func reason(store: MLXModelStore, runtime: MLXRuntime) -> ModelUnavailableReason? {

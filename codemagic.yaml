@@ -36,10 +36,16 @@ workflows:
           brew install xcodegen
           xcodegen generate
           mkdir -p "$XCODE_PROJECT/project.xcworkspace/xcshareddata/swiftpm"
-          cp Packages/PocketAgentRuntime/Package.resolved \
+          cp App/Package.resolved \
             "$XCODE_PROJECT/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - name: Resolve packages
-        script: xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME"
+        script: |
+          # Trust package macros (MLXHuggingFace) non-interactively, also for the archive step.
+          # ("Validatation" is Xcode's own spelling of this key.)
+          defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
+          defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
+            -skipMacroValidation -skipPackagePluginValidation
       - name: Apply signing profiles
         script: xcode-project use-profiles
       - name: Set build number (latest TestFlight build + 1)
@@ -47,7 +53,10 @@ workflows:
           LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
           agvtool new-version -all $((LATEST + 1))
       - name: Build signed ipa
-        script: xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME"
+        # "=" form: argparse rejects a separate value that starts with "-".
+        script: |
+          xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME" \
+            --archive-flags="-skipMacroValidation -skipPackagePluginValidation"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log

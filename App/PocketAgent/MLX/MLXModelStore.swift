@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import PocketAgentCore
 #if !targetEnvironment(simulator)
-import Hub
+import HuggingFace
 #endif
 
 /// Thrown by the real MLX/Hub implementations on the simulator, where MLX cannot run.
@@ -16,7 +16,8 @@ protocol ModelDownloading: Sendable {
     func delete(_ model: MLXModelInfo, at base: URL) throws
 }
 
-/// Files live where swift-transformers' `HubApi` puts them: `base/models/<repo id>`.
+/// Files live where swift-transformers' `HubApi` put them in earlier builds: `base/models/<repo id>`,
+/// so models downloaded before the move to swift-huggingface keep loading without a new download.
 struct HubModelDownloader: ModelDownloading {
     static let globs = ["*.safetensors", "*.json", "*.txt", "*.model", "*.tiktoken"]
 
@@ -38,9 +39,12 @@ struct HubModelDownloader: ModelDownloading {
         var baseURL = base
         try? baseURL.setResourceValues(excluded)
 
-        let hub = HubApi(downloadBase: base)
-        try await hub.snapshot(
-            from: HubApi.Repo(id: model.id), revision: model.revision, matching: Self.globs,
+        guard let repo = Repo.ID(rawValue: model.id) else { throw MLXModelFilesMissing() }
+        // No cache: files go straight into the model directory (a cache would keep a second copy).
+        let hub = HubClient(cache: nil)
+        _ = try await hub.downloadSnapshot(
+            of: repo, kind: .model, to: Self.directory(of: model, at: base), revision: model.revision,
+            matching: Self.globs,
             progressHandler: { (value: Progress) in progress(value.fractionCompleted) })
         #endif
     }

@@ -15,20 +15,25 @@ settings:
     DEVELOPMENT_TEAM: ""
 
 packages:
+  # Fork of AgentRunKit 6.1.0 without AgentRunKitMLX and its mlx-swift-lm 2.30.x pin (ADR-035).
   AgentRunKit:
-    url: https://github.com/Tom-Ryder/AgentRunKit.git
-    exactVersion: 6.1.0
-  # Same revision as the transitive pin (Package.resolved); listed so the app can link the MLX product.
-  MLX:
-    url: https://github.com/ml-explore/mlx-swift.git
-    exactVersion: 0.30.6
-  # Same revisions as the transitive pins; listed so the app can import MLXLMCommon / Hub (Task 4 loader/downloader).
+    url: https://github.com/beesan82/AgentRunKit.git
+    exactVersion: 6.1.0-pocket.1
+  # On-device models through Foundation Models: MLXFoundationModels (MLXLanguageModel), ADR-035/036.
   mlx-swift-lm:
     url: https://github.com/ml-explore/mlx-swift-lm
-    exactVersion: 2.30.6
+    exactVersion: 3.32.3
+  # Same revision as mlx-swift-lm's pin; listed so the app can read Memory.activeMemory.
+  MLX:
+    url: https://github.com/ml-explore/mlx-swift.git
+    exactVersion: 0.32.3
+  # Download (HubClient) and tokenizer loading (#huggingFaceTokenizerLoader) for MLX models.
+  swift-huggingface:
+    url: https://github.com/huggingface/swift-huggingface
+    exactVersion: 0.13.0
   swift-transformers:
     url: https://github.com/huggingface/swift-transformers
-    exactVersion: 1.1.9
+    exactVersion: 1.3.5
   PocketAgentCore:
     path: Packages/PocketAgentCore
   PocketAgentRuntime:
@@ -47,14 +52,20 @@ targets:
         product: AgentRunKit
       - package: AgentRunKit
         product: AgentRunKitFoundationModels
-      - package: AgentRunKit
-        product: AgentRunKitMLX
-      - package: MLX
-        product: MLX
+      - package: mlx-swift-lm
+        product: MLXFoundationModels
+      - package: mlx-swift-lm
+        product: MLXHuggingFace
+      - package: mlx-swift-lm
+        product: MLXLLM
       - package: mlx-swift-lm
         product: MLXLMCommon
+      - package: MLX
+        product: MLX
+      - package: swift-huggingface
+        product: HuggingFace
       - package: swift-transformers
-        product: Hub
+        product: Tokenizers
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beesan82.pocketagent
