@@ -1,3 +1,4 @@
+import PocketAgentCore
 import SwiftData
 import SwiftUI
 
