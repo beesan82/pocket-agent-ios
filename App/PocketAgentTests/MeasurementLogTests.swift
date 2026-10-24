@@ -36,21 +36,74 @@ struct MeasurementLogTests {
         #expect(lines.contains("[12:04:05]   > 本文"))
     }
 
-    @Test func clearEmpties() {
+    @Test func clearEmpties() throws {
         let url = tempURL()
         let log = MeasurementLog(fileURL: url)
         log.append("a")
-        log.clear()
+        try log.clear()
         #expect(log.entries.isEmpty)
         #expect(MeasurementLog(fileURL: url).entries.isEmpty)
     }
 
-    @Test func clearRemovesPersistedFileContent() {
+    @Test func clearRemovesPersistedFileContent() throws {
         let url = tempURL()
         let log = MeasurementLog(fileURL: url)
         log.append("音声テストの内容")
         #expect(FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
-        log.clear()
+        try log.clear()
+        #expect(!FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
+    }
+
+    @Test func clearPreservesMemoryAndPersistedContentWhenRemovalFailsThenAllowsRetry() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        var denyRemoval = true
+        let log = MeasurementLog(fileURL: url, removeItem: { target in
+            if denyRemoval {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try FileManager.default.removeItem(at: target)
+        })
+        log.append("音声テストの内容\n再試行まで保持する")
+        let originalEntries = log.entries
+        let originalData = try Data(contentsOf: url)
+        #expect(MeasurementLog(fileURL: url).entries == originalEntries)
+
+        #expect(throws: CocoaError.self) { try log.clear() }
+
+        #expect(log.entries == originalEntries)
+        #expect(try Data(contentsOf: url) == originalData)
+        #expect(MeasurementLog(fileURL: url).entries == originalEntries)
+
+        denyRemoval = false
+        try log.clear()
+
+        #expect(log.entries.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
+        #expect(MeasurementLog(fileURL: url).entries.isEmpty)
+    }
+
+    @Test func clearSucceedsWhenPersistedFileIsAlreadyMissing() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let log = MeasurementLog(fileURL: url)
+        log.append("ディスク上では削除済みの記録")
+        try FileManager.default.removeItem(at: url)
+
+        try log.clear()
+
+        #expect(log.entries.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
+        try log.clear()
+    }
+
+    @Test func clearSucceedsBeforeAnyLogHasBeenWritten() throws {
+        let url = tempURL()
+        let log = MeasurementLog(fileURL: url)
+
+        try log.clear()
+
+        #expect(log.entries.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
     }
 
