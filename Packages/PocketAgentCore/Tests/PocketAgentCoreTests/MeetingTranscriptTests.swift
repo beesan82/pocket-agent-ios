@@ -36,10 +36,32 @@ struct MeetingTranscriptTests {
         #expect(TranscriptSegment(offset: 0, text: "Thanks", language: "en", translation: "ありがとう").japaneseSide == "ありがとう")
         #expect(TranscriptSegment(offset: 0, text: "Thanks", language: "en").japaneseSide == "Thanks")
         #expect(TranscriptSegment(offset: 0, text: "はい", language: "ja", translation: "Yes").japaneseSide == "はい")
-        #expect(TranscriptSegment(offset: 0, text: "はい").otherLanguage == "en")
         let translated = TranscriptSegment(offset: 3, text: "Hi", language: "en").withTranslation("やあ")
         #expect(translated.translation == "やあ")
         #expect(translated.offset == 3)
+    }
+
+    @Test func chineseMarkAndTranslationLanguage() {
+        let segments = [
+            TranscriptSegment(offset: 2, text: "我们下周开会", language: "zh").withTranslation("来週会議をします", language: "ja"),
+            TranscriptSegment(offset: 6, text: "Sounds good", language: "en").withTranslation("好的", language: "zh"),
+        ]
+        #expect(MeetingTranscriptFormatter.text(segments)
+            == "[00:02] (ZH) 我们下周开会\n    → 来週会議をします\n[00:06] (EN) Sounds good\n    → 好的")
+        #expect(segments[0].translationLanguage == "ja")
+    }
+
+    @Test func japaneseSideOnlyUsesJapaneseTranslations() {
+        let zhToJa = TranscriptSegment(offset: 0, text: "好的", language: "zh").withTranslation("了解", language: "ja")
+        let enToZh = TranscriptSegment(offset: 0, text: "Sounds good", language: "en").withTranslation("好的", language: "zh")
+        #expect(zhToJa.japaneseSide == "了解")
+        #expect(enToZh.japaneseSide == "Sounds good")
+    }
+
+    @Test func languageTableHasJapaneseEnglishChinese() {
+        #expect(MeetingLanguage.all.map(\.code) == ["ja", "en", "zh"])
+        #expect(MeetingLanguage.named("zh")?.localeIdentifier == "zh_CN")
+        #expect(MeetingLanguage.named("fr") == nil)
     }
 
     @Test func autoUpdateNeedsAllConditions() {
@@ -72,6 +94,13 @@ struct MeetingTranscriptTests {
         #expect(MeetingNotesPolicy.isComplete("## 決まったこと\n- A\n## 宿題\n- （なし）\n## 論点・未決\n- B"))
         #expect(MeetingNotesPolicy.isComplete("## 決まったこと\n- A\n## 宿題\n- B") == false)
         #expect(MeetingNotesPolicy.isComplete("") == false)
+    }
+
+    @Test func generatedTitleIsCleaned() {
+        #expect(MeetingTitle.cleaned("「納期と価格表の件」。") == "納期と価格表の件")
+        #expect(MeetingTitle.cleaned("  ") == nil)
+        #expect(MeetingTitle.cleaned(nil) == nil)
+        #expect(MeetingTitle.cleaned(String(repeating: "あ", count: 30))?.count == 20)
     }
 
     @Test func titleUsesMonthDayHourMinute() throws {

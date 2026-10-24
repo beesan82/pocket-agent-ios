@@ -96,6 +96,10 @@ jobs:
             -skipMacroValidation -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO | tee build.log
 
+      - name: Check built Info.plist (background audio)
+        if: ${{ !inputs.packages_only }}
+        run: bash ci/check-info-plist.sh
+
       - name: Build (iOS device, unsigned)
         if: ${{ !inputs.packages_only }}
         run: |

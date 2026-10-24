@@ -24,6 +24,27 @@ struct LanguageArbiterTests {
         #expect(ScriptGuess.japaneseRatio("あいう") == 1.0)
     }
 
+    @Test func scriptGuessSeparatesJapaneseAndChinese() {
+        #expect(ScriptGuess.language(of: "納期を延ばします", among: ["ja", "zh"]) == "ja")
+        #expect(ScriptGuess.language(of: "我们下周开会", among: ["ja", "zh"]) == "zh")
+        #expect(ScriptGuess.language(of: "我们下周开会", among: ["ja", "en"]) == "ja")
+        #expect(ScriptGuess.language(of: "Sounds good", among: ["en", "zh"]) == "en")
+        #expect(ScriptGuess.language(of: "我们", among: ["en", "zh"]) == "zh")
+    }
+
+    @Test func arbiterUsesItsLanguagesForScriptDecisions() {
+        var arbiter = LanguageArbiter(languages: ["ja", "zh"])
+        let ja = candidate("ja", "我们下周", confidence: nil, start: 1, end: 2, arrivedAt: 2.1)
+        let zh = candidate("zh", "我们下周开会", confidence: nil, start: 1, end: 2, arrivedAt: 2.1)
+        _ = arbiter.submit(ja)
+        _ = arbiter.submit(zh)
+        #expect(arbiter.drain().first?.language == "zh")
+
+        var single = LanguageArbiter(languages: ["ja", "zh"])
+        _ = single.submit(candidate("zh", "我们下周开会", confidence: nil, start: 1, end: 2, arrivedAt: 2.1))
+        #expect(single.drain().first?.reason == .single)
+    }
+
     @Test func overlappingPairPicksHigherConfidence() {
         var arbiter = LanguageArbiter()
         let ja = candidate("ja", "納期は延ばせますか", confidence: 0.88, start: 1, end: 3, arrivedAt: 3.2)

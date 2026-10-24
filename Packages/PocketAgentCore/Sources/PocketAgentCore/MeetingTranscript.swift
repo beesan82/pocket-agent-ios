@@ -6,30 +6,35 @@ public struct TranscriptSegment: Sendable, Equatable, Identifiable {
     public let id: UUID
     public let offset: TimeInterval
     public let text: String
-    /// "ja" or "en".
+    /// Language code of the original ("ja", "en", "zh", see `MeetingLanguage`).
     public let language: String
     public let translation: String?
+    /// Language code of `translation` (nil when there is none).
+    public let translationLanguage: String?
 
+    /// Without `translationLanguage`, a translation is taken to be ja→en / other→ja (the first bilingual pair).
     public init(
-        id: UUID = UUID(), offset: TimeInterval, text: String, language: String = "ja", translation: String? = nil
+        id: UUID = UUID(), offset: TimeInterval, text: String, language: String = "ja", translation: String? = nil,
+        translationLanguage: String? = nil
     ) {
         self.id = id
         self.offset = offset
         self.text = text
         self.language = language
         self.translation = translation
+        self.translationLanguage = translation == nil ? nil : (translationLanguage ?? (language == "ja" ? "en" : "ja"))
     }
 
-    public func withTranslation(_ translation: String) -> TranscriptSegment {
-        TranscriptSegment(id: id, offset: offset, text: text, language: language, translation: translation)
+    public func withTranslation(_ translation: String, language target: String? = nil) -> TranscriptSegment {
+        TranscriptSegment(
+            id: id, offset: offset, text: text, language: language, translation: translation, translationLanguage: target)
     }
 
-    /// The language the utterance would be translated into.
-    public var otherLanguage: String { language == "en" ? "ja" : "en" }
-
-    /// The Japanese text of the utterance: the original, or for English the translation when there is one.
+    /// The text the (Japanese) notes read: a Japanese original, a Japanese translation, or else the original.
     public var japaneseSide: String {
-        language == "en" ? (translation ?? text) : text
+        if language == "ja" { return text }
+        if translationLanguage == "ja", let translation { return translation }
+        return text
     }
 }
 
@@ -50,7 +55,7 @@ public enum MeetingTranscriptFormatter {
     /// English originals are marked `(EN)`; a translation follows on its own `    → ` line.
     public static func text(_ segments: [TranscriptSegment]) -> String {
         segments.map { segment in
-            let mark = segment.language == "en" ? "(EN) " : ""
+            let mark = MeetingLanguage.named(segment.language)?.transcriptMark ?? "(\(segment.language.uppercased())) "
             var line = "[\(timestamp(segment.offset))] \(mark)\(segment.text)"
             if let translation = segment.translation, !translation.isEmpty {
                 line += "\n    → \(translation)"
@@ -100,5 +105,19 @@ public enum MeetingTitle {
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "M/d HH:mm"
         return "会議 " + formatter.string(from: start)
+    }
+
+    public static let maxGeneratedLength = 20
+
+    /// A model-written headline, cleaned (quotes and a trailing period dropped, at most 20 characters);
+    /// nil when nothing usable is left, so the caller falls back to `make(start:)`.
+    public static func cleaned(_ generated: String?) -> String? {
+        guard var title = generated?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return nil }
+        let quotes: Set<Character> = ["「", "」", "『", "』", "\"", "“", "”", "'"]
+        title.removeAll { quotes.contains($0) }
+        while let last = title.last, "。.".contains(last) { title.removeLast() }
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        return String(title.prefix(maxGeneratedLength))
     }
 }

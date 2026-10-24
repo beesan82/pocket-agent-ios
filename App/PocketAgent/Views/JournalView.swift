@@ -168,14 +168,14 @@ struct JournalView: View {
             if let reason = speech.reason, !isRecordingBusy {
                 Text(reason.userMessage).font(.footnote).foregroundStyle(.secondary)
                 switch reason {
-                case .assetsNotInstalled, .englishAssetsNotInstalled:
+                case .assetsNotInstalled, .languageAssetsNotInstalled:
                     Button("音声データを入手") { confirmInstall = true }.font(.footnote)
                 case .permissionDenied:
                     Button("マイクと音声認識を許可") {
                         Task { await speech.requestPermissions() }
                     }
                     .font(.footnote)
-                case .moduleUnavailable, .japaneseUnsupported, .englishUnsupported:
+                case .moduleUnavailable, .japaneseUnsupported, .languageUnsupported:
                     EmptyView()
                 }
             }

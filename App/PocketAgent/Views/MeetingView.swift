@@ -18,12 +18,25 @@ struct MeetingView: View {
     @State private var confirmInstall = false
     @State private var modelTask: Task<Void, Never>?
     /// Two languages (ja/en) for the next meeting, remembered between launches.
-    @AppStorage("meeting.bilingual") private var bilingualPreferred = false
+    /// The meeting's languages, remembered between launches: language 1, and language 2 ("" = none).
+    @AppStorage("meeting.language1") private var language1 = "ja"
+    @AppStorage("meeting.language2") private var language2 = ""
     @State private var translationInstalled = false
     @State private var translationConfig: TranslationSession.Configuration?
     @State private var translationMessage: String?
 
-    static let translationMissingText = "翻訳データ（日↔英）を入手すると訳が付きます。"
+    private var chosenLanguages: [String] {
+        language2.isEmpty || language2 == language1 ? [language1] : [language1, language2]
+    }
+
+    /// "日本語・English" for the meeting's languages.
+    private var languageNames: String {
+        meeting.languages.map { MeetingLanguage.named($0)?.displayName ?? $0 }.joined(separator: "・")
+    }
+
+    private var translationMissingText: String {
+        "翻訳データ（\(languageNames)）を入手すると訳が付きます。"
+    }
     static let translationDownloadFailedText = "翻訳データを入手できませんでした。通信環境を確認して再試行してください。"
 
     private var backend: JournalBackend {
@@ -51,12 +64,16 @@ struct MeetingView: View {
             }
         }
         .task {
-            meeting.setBilingual(bilingualPreferred)
+            migrateBilingualSetting()
+            meeting.setLanguages(chosenLanguages)
             await meeting.source.refreshAvailability()
             await refreshTranslation()
         }
-        .onChange(of: bilingualPreferred) { _, value in
-            meeting.setBilingual(value)
+        .onChange(of: language1) { _, value in
+            if language2 == value { language2 = "" }
+        }
+        .onChange(of: chosenLanguages) { _, value in
+            meeting.setLanguages(value)
             Task {
                 await meeting.source.refreshAvailability()
                 await refreshTranslation()
@@ -75,9 +92,7 @@ struct MeetingView: View {
         }
         .stopsJournalGeneration(runtime: mlxRuntime) { meeting.stopNotesUpdate() }
         .confirmationDialog(
-            meeting.bilingual
-                ? "日本語と英語の音声認識データをダウンロードします（通信が発生します）"
-                : "日本語の音声認識データをダウンロードします（通信が発生します）",
+            "\(languageNames)の音声認識データをダウンロードします（通信が発生します）",
             isPresented: $confirmInstall, titleVisibility: .visible
         ) {
             Button("ダウンロード") { installAssets() }
@@ -113,7 +128,7 @@ struct MeetingView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(meeting.source.reason != nil)
-            Toggle("二言語（日本語・English）", isOn: $bilingualPreferred)
+            languagePickers
                 .padding(.horizontal, 40)
             speechAvailability
             if meeting.bilingual {
@@ -138,14 +153,14 @@ struct MeetingView: View {
                 Text(reason.userMessage).font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 switch reason {
-                case .assetsNotInstalled, .englishAssetsNotInstalled:
+                case .assetsNotInstalled, .languageAssetsNotInstalled:
                     Button("音声データを入手") { confirmInstall = true }.font(.footnote)
                 case .permissionDenied:
                     Button("マイクと音声認識を許可") {
                         Task { await meeting.source.requestPermissions() }
                     }
                     .font(.footnote)
-                case .moduleUnavailable, .japaneseUnsupported, .englishUnsupported:
+                case .moduleUnavailable, .japaneseUnsupported, .languageUnsupported:
                     EmptyView()
                 }
             }
@@ -160,11 +175,11 @@ struct MeetingView: View {
     private var translationAvailability: some View {
         VStack(spacing: 8) {
             if translationInstalled {
-                Text("翻訳: 日↔英 導入済み").font(.footnote).foregroundStyle(.secondary)
+                Text("翻訳: \(languageNames) 導入済み").font(.footnote).foregroundStyle(.secondary)
             } else {
-                Text(Self.translationMissingText).font(.footnote).foregroundStyle(.secondary)
+                Text(translationMissingText).font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                Button("翻訳データを入手（日↔英）") { requestTranslationDownload() }
+                Button("翻訳データを入手（\(languageNames)）") { requestTranslationDownload() }
                     .font(.footnote)
                     .disabled(translationConfig != nil)
             }
@@ -195,7 +210,7 @@ struct MeetingView: View {
             notesCard
                 .padding(.horizontal)
             if meeting.bilingual, meeting.translator == nil {
-                Text(Self.translationMissingText).font(.footnote).foregroundStyle(.secondary)
+                Text(translationMissingText).font(.footnote).foregroundStyle(.secondary)
                     .padding(.top, 6)
             }
             Divider().padding(.top, 12)
@@ -328,8 +343,10 @@ struct MeetingView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .top, spacing: 12) {
-                        Text("日本語").font(.caption.bold()).frame(maxWidth: .infinity, alignment: .leading)
-                        Text("English").font(.caption.bold()).frame(maxWidth: .infinity, alignment: .leading)
+                        ForEach(meeting.languages, id: \.self) { code in
+                            Text(MeetingLanguage.named(code)?.displayName ?? code)
+                                .font(.caption.bold()).frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                     .foregroundStyle(.secondary)
                     ForEach(meeting.segments) { segment in
@@ -337,8 +354,9 @@ struct MeetingView: View {
                             Text(MeetingTranscriptFormatter.timestamp(segment.offset))
                                 .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                             HStack(alignment: .top, spacing: 12) {
-                                cell(for: segment, column: "ja")
-                                cell(for: segment, column: "en")
+                                ForEach(meeting.languages, id: \.self) { code in
+                                    cell(for: segment, column: code)
+                                }
                             }
                         }
                         .id(segment.id)
@@ -347,7 +365,7 @@ struct MeetingView: View {
                         Text(meeting.volatileText).foregroundStyle(.secondary)
                     }
                     if meeting.segments.isEmpty, meeting.volatileText.isEmpty {
-                        Text("日本語でも英語でも、話し始めるとここに流れます。").foregroundStyle(.secondary)
+                        Text("どちらの言語でも、話し始めるとここに流れます。").foregroundStyle(.secondary)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -374,19 +392,47 @@ struct MeetingView: View {
 
     // MARK: Actions
 
+    private var languagePickers: some View {
+        VStack(spacing: 4) {
+            Picker("言語 1", selection: $language1) {
+                ForEach(MeetingLanguage.all) { language in
+                    Text(language.displayName).tag(language.code)
+                }
+            }
+            Picker("言語 2", selection: $language2) {
+                Text("なし").tag("")
+                ForEach(MeetingLanguage.all.filter { $0.code != language1 }) { language in
+                    Text(language.displayName).tag(language.code)
+                }
+            }
+        }
+        .pickerStyle(.menu)
+    }
+
+    /// The earlier 「二言語（日本語・English）」 switch: ON becomes language 2 = English, once.
+    private func migrateBilingualSetting() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "meeting.bilingual") != nil else { return }
+        if defaults.bool(forKey: "meeting.bilingual"), defaults.object(forKey: "meeting.language2") == nil {
+            language2 = "en"
+        }
+        defaults.removeObject(forKey: "meeting.bilingual")
+    }
+
     private func refreshTranslation() async {
-        guard meeting.bilingual else { return }
-        let jaToEn = await AppleTranslator.isInstalled(from: "ja", to: "en")
-        let enToJa = await AppleTranslator.isInstalled(from: "en", to: "ja")
-        translationInstalled = jaToEn && enToJa
+        guard meeting.bilingual, let first = meeting.languages.first, let second = meeting.languages.last else { return }
+        let forward = await AppleTranslator.isInstalled(from: first, to: second)
+        let backward = await AppleTranslator.isInstalled(from: second, to: first)
+        translationInstalled = forward && backward
     }
 
     /// One direction per consent sheet; the button stays until both directions are installed.
     private func requestTranslationDownload() {
         translationMessage = nil
+        guard let first = meeting.languages.first, let second = meeting.languages.last, first != second else { return }
         Task {
-            let jaToEn = await AppleTranslator.isInstalled(from: "ja", to: "en")
-            let (source, target) = jaToEn ? ("en", "ja") : ("ja", "en")
+            let forward = await AppleTranslator.isInstalled(from: first, to: second)
+            let (source, target) = forward ? (second, first) : (first, second)
             translationConfig = TranslationSession.Configuration(
                 source: Locale.Language(identifier: source), target: Locale.Language(identifier: target))
         }
