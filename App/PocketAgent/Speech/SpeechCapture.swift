@@ -12,7 +12,9 @@ enum SpeechCaptureError: Error {
     case interrupted
 }
 
-/// On-device Japanese speech capture: microphone → SpeechAnalyzer + SpeechTranscriber.
+/// On-device speech capture: microphone → SpeechAnalyzer + SpeechTranscriber, Japanese by default.
+/// With two locales (ja + en) the same microphone audio feeds one analyzer per language and each
+/// final result is reported as a `.candidate` with its confidence; the consumer picks the language.
 /// Build-only in CI; recording and transcription are verified on a real iPhone.
 @MainActor
 @Observable
@@ -32,6 +34,7 @@ final class SpeechCapture: TranscriptSource {
     static let interruptedText = "録音が中断されました。再開してください。"
 
     private static let japanese = Locale(identifier: "ja_JP")
+    static let english = Locale(identifier: "en_US")
 
     private(set) var state: State = .idle
     /// Latest non-final result (replaced as recognition improves).
@@ -39,8 +42,13 @@ final class SpeechCapture: TranscriptSource {
     /// All final results joined without separators (Japanese needs no spaces).
     private(set) var finalText = ""
     private(set) var reason: SpeechUnavailableReason?
+    /// Bilingual capture: the latest tentative text per language ("ja" / "en").
+    private(set) var laneVolatile: [String: String] = [:]
 
-    @ObservationIgnored private var transcriberLocale: Locale?
+    /// The requested locales: Japanese first, then (bilingual) English.
+    @ObservationIgnored let locales: [Locale]
+    var isBilingual: Bool { locales.count > 1 }
+    @ObservationIgnored private var transcriberLocales: [Locale] = []
     @ObservationIgnored private var pipeline: AudioPipeline?
     @ObservationIgnored private var resultsTask: Task<Void, Never>?
     /// Bumped by every `start()` and by `stop()` during preparation; a running start that
@@ -56,17 +64,27 @@ final class SpeechCapture: TranscriptSource {
     /// Captures holding the shared `AVAudioSession`; it is deactivated when the last one lets go.
     private static var sessionHolders = 0
 
+    init(locales: [Locale] = [Locale(identifier: "ja_JP")]) {
+        self.locales = locales.isEmpty ? [Self.japanese] : locales
+    }
+
     func refreshAvailability() async {
         let isAvailable = SpeechTranscriber.isAvailable
-        let supported = await SpeechTranscriber.supportedLocale(equivalentTo: Self.japanese)
         let installed = await SpeechTranscriber.installedLocales
-        transcriberLocale = supported
+        var supported: [Locale?] = []
+        for locale in locales {
+            supported.append(await SpeechTranscriber.supportedLocale(equivalentTo: locale))
+        }
+        transcriberLocales = zip(locales, supported).map { $1 ?? $0 }
+        let assets = locales.map { locale in installed.contains { Self.sameLanguage($0, locale) } }
         reason = SpeechAvailability.reason(
             isAvailable: isAvailable,
-            supportsJapanese: supported != nil,
-            assetsInstalled: installed.contains(where: Self.isJapanese),
+            supportsJapanese: supported.first.flatMap { $0 } != nil,
+            assetsInstalled: assets.first ?? false,
             permissionGranted: AVAudioApplication.shared.recordPermission == .granted
-                && SFSpeechRecognizer.authorizationStatus() == .authorized)
+                && SFSpeechRecognizer.authorizationStatus() == .authorized,
+            supportsEnglish: supported.count < 2 || supported[1] != nil,
+            englishAssetsInstalled: assets.count < 2 || assets[1])
     }
 
     /// Asks for microphone and speech recognition permission (only those not yet decided).
@@ -80,10 +98,10 @@ final class SpeechCapture: TranscriptSource {
         await refreshAvailability()
     }
 
-    /// Downloads the Japanese transcription assets. Call only from a user tap.
+    /// Downloads the transcription assets of every locale. Call only from a user tap.
     func installAssets() async throws {
         do {
-            try await Self.downloadAssets(locale: transcriberLocale ?? Self.japanese)
+            try await Self.downloadAssets(locales: transcriberLocales.isEmpty ? locales : transcriberLocales)
         } catch {
             // Never overwrite a running capture's state.
             if state == .idle || Self.isFailed(state) { state = .failed(Self.installFailedText) }
@@ -108,6 +126,7 @@ final class SpeechCapture: TranscriptSource {
         resultsFailedWhilePreparing = false
         volatileText = ""
         finalText = ""
+        laneVolatile = [:]
         let (stream, continuation) = AsyncStream.makeStream(of: TranscriptEvent.self)
         events?.finish()
         events = continuation
@@ -121,18 +140,29 @@ final class SpeechCapture: TranscriptSource {
         }
         var created: AudioPipeline?
         do {
-            let pipeline = try await AudioPipeline.make(locale: transcriberLocale ?? Self.japanese)
+            let pipeline = try await AudioPipeline.make(
+                locales: transcriberLocales.isEmpty ? locales : transcriberLocales, bilingual: isBilingual)
             created = pipeline
             guard generation == startGeneration else { throw SpeechCaptureError.interrupted }
             self.pipeline = pipeline
-            let transcriber = pipeline.transcriber
-            resultsTask = Task { [weak self] in await self?.consume(transcriber) }
+            let lanes = pipeline.lanes
+            let bilingual = isBilingual
+            resultsTask = Task { [weak self] in
+                await withTaskGroup(of: Void.self) { group in
+                    for lane in lanes {
+                        group.addTask { @MainActor [weak self] in
+                            await self?.consume(lane.transcriber, language: bilingual ? lane.language : nil)
+                        }
+                    }
+                }
+            }
             try activateSession()
             try await pipeline.startAnalyzer()
             guard generation == startGeneration, !resultsFailedWhilePreparing else {
                 throw SpeechCaptureError.interrupted
             }
             try pipeline.startEngine()
+            startedAt = Date()  // audio time 0 of the analyzers
             observeInterruptions()
             state = .recording
             return stream
@@ -189,6 +219,7 @@ final class SpeechCapture: TranscriptSource {
         stopObservingInterruptions()
         deactivateSession()
         volatileText = ""
+        laneVolatile = [:]
         if state == .finishing { state = graceful ? .idle : previous }
         finishEvents()
     }
@@ -206,11 +237,21 @@ final class SpeechCapture: TranscriptSource {
         return Date().timeIntervalSince(startedAt)
     }
 
-    private func consume(_ transcriber: SpeechTranscriber) async {
+    /// Seconds since this capture started (the clock of bilingual candidates).
+    var elapsed: TimeInterval {
+        startedAt.map { Date().timeIntervalSince($0) } ?? 0
+    }
+
+    /// `language` is nil for a single-language capture (`.final` / `.volatile` events as before).
+    private func consume(_ transcriber: SpeechTranscriber, language: String?) async {
         do {
             for try await result in transcriber.results {
                 // Flatten here so no AttributedString reaches the UI.
                 let text = String(result.text.characters)
+                if let language {
+                    report(result, text: text, language: language)
+                    continue
+                }
                 if result.isFinal {
                     finalText += text
                     volatileText = ""
@@ -226,6 +267,28 @@ final class SpeechCapture: TranscriptSource {
         } catch {
             await handleResultsFailure()
         }
+    }
+
+    private func report(_ result: SpeechTranscriber.Result, text: String, language: String) {
+        guard result.isFinal else {
+            laneVolatile[language] = text
+            return
+        }
+        laneVolatile[language] = nil
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var runs: [(characters: Int, confidence: Double?)] = []
+        for run in result.text.runs {
+            let characters = result.text[run.range].characters.count
+            runs.append((characters, run[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self].map { Double($0) }))
+        }
+        let arrived = elapsed
+        let start = result.range.start.seconds
+        let end = result.range.end.seconds
+        let valid = start.isFinite && end.isFinite && start >= 0 && end >= start
+        events?.yield(.candidate(LaneCandidate(
+            language: language, text: trimmed, confidence: ConfidenceMath.weightedAverage(runs),
+            start: valid ? start : arrived, end: valid ? end : arrived, arrivedAt: arrived)))
     }
 
     private func handleResultsFailure() async {
@@ -306,9 +369,8 @@ final class SpeechCapture: TranscriptSource {
         deactivateSession()
     }
 
-    private static func isJapanese(_ locale: Locale) -> Bool {
-        let id = locale.identifier(.bcp47)
-        return id == "ja" || id.hasPrefix("ja-")
+    private static func sameLanguage(_ lhs: Locale, _ rhs: Locale) -> Bool {
+        lhs.language.languageCode == rhs.language.languageCode
     }
 
     /// The session is shared by every `SpeechCapture` (journal dictation, meeting): activation is
@@ -351,44 +413,61 @@ final class SpeechCapture: TranscriptSource {
         }
     }
 
-    nonisolated private static func downloadAssets(locale: Locale) async throws {
-        let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
-        if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+    nonisolated private static func downloadAssets(locales: [Locale]) async throws {
+        let transcribers = locales.map { SpeechTranscriber(locale: $0, preset: .progressiveTranscription) }
+        if let request = try await AssetInventory.assetInstallationRequest(supporting: transcribers) {
             try await request.downloadAndInstall()
         }
     }
 }
 
-/// Engine, converter and analyzer for one recording. Not main-actor isolated: the tap block
-/// runs on the audio thread. `converter` is written once before the engine starts and then
-/// only used from the tap; the other members are immutable or thread-safe.
+/// Engine, converter and one analyzer per language for one recording. Not main-actor isolated:
+/// the tap block runs on the audio thread. `converter` is written once before the engine starts and
+/// then only used from the tap; the other members are immutable or thread-safe.
 private final class AudioPipeline: @unchecked Sendable {
-    let transcriber: SpeechTranscriber
-    private let analyzer: SpeechAnalyzer
-    private let analyzerFormat: AVAudioFormat
-    private let engine = AVAudioEngine()
-    private let stream: AsyncStream<AnalyzerInput>
-    private let continuation: AsyncStream<AnalyzerInput>.Continuation
-    private var converter: AVAudioConverter?
-
-    private init(transcriber: SpeechTranscriber, analyzerFormat: AVAudioFormat) {
-        self.transcriber = transcriber
-        self.analyzer = SpeechAnalyzer(modules: [transcriber])
-        self.analyzerFormat = analyzerFormat
-        (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
+    struct Lane: Sendable {
+        let language: String
+        let transcriber: SpeechTranscriber
     }
 
-    static func make(locale: Locale) async throws -> AudioPipeline {
-        // Progressive preset reports volatile (tentative) results for live display.
-        let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
-        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+    let lanes: [Lane]
+    private let analyzers: [SpeechAnalyzer]
+    private let analyzerFormat: AVAudioFormat
+    private let engine = AVAudioEngine()
+    private let streams: [AsyncStream<AnalyzerInput>]
+    private let continuations: [AsyncStream<AnalyzerInput>.Continuation]
+    private var converter: AVAudioConverter?
+
+    private init(lanes: [Lane], analyzerFormat: AVAudioFormat) {
+        self.lanes = lanes
+        self.analyzers = lanes.map { SpeechAnalyzer(modules: [$0.transcriber]) }
+        self.analyzerFormat = analyzerFormat
+        let made = lanes.map { _ in AsyncStream.makeStream(of: AnalyzerInput.self) }
+        streams = made.map { $0.stream }
+        continuations = made.map { $0.continuation }
+    }
+
+    static func make(locales: [Locale], bilingual: Bool) async throws -> AudioPipeline {
+        let lanes = locales.map { locale in
+            // Progressive (volatile + fast results) for live display; bilingual adds the time range
+            // and per-word confidence the language decision needs.
+            let transcriber = bilingual
+                ? SpeechTranscriber(
+                    locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults],
+                    attributeOptions: [.audioTimeRange, .transcriptionConfidence])
+                : SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
+            return Lane(language: locale.language.languageCode?.identifier ?? "ja", transcriber: transcriber)
+        }
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: lanes.map { $0.transcriber }) else {
             throw SpeechCaptureError.noAudioFormat
         }
-        return AudioPipeline(transcriber: transcriber, analyzerFormat: format)
+        return AudioPipeline(lanes: lanes, analyzerFormat: format)
     }
 
     func startAnalyzer() async throws {
-        try await analyzer.start(inputSequence: stream)
+        for (analyzer, stream) in zip(analyzers, streams) {
+            try await analyzer.start(inputSequence: stream)
+        }
     }
 
     func startEngine() throws {
@@ -409,31 +488,41 @@ private final class AudioPipeline: @unchecked Sendable {
         try engine.start()
     }
 
-    /// Stops the microphone and ends the input sequence.
+    /// Stops the microphone and ends the input sequences.
     func stopEngine() {
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
-        continuation.finish()
+        continuations.forEach { $0.finish() }
     }
 
     /// Finalizes all results after the input ended; falls back to an immediate finish.
     func finishAnalysis() async {
-        do {
-            try await analyzer.finalizeAndFinishThroughEndOfInput()
-        } catch {
-            await analyzer.cancelAndFinishNow()
+        for analyzer in analyzers {
+            do {
+                try await analyzer.finalizeAndFinishThroughEndOfInput()
+            } catch {
+                await analyzer.cancelAndFinishNow()
+            }
         }
     }
 
     func cancel() async {
         stopEngine()
-        await analyzer.cancelAndFinishNow()
+        for analyzer in analyzers {
+            await analyzer.cancelAndFinishNow()
+        }
+    }
+
+    private func yield(_ buffer: AVAudioPCMBuffer) {
+        for continuation in continuations {
+            continuation.yield(AnalyzerInput(buffer: buffer))
+        }
     }
 
     /// Audio thread.
     private func feed(_ buffer: AVAudioPCMBuffer) {
         guard let converter else {
-            continuation.yield(AnalyzerInput(buffer: buffer))
+            yield(buffer)
             return
         }
         let ratio = analyzerFormat.sampleRate / buffer.format.sampleRate
@@ -450,7 +539,7 @@ private final class AudioPipeline: @unchecked Sendable {
             return next
         }
         guard status != .error, output.frameLength > 0 else { return }
-        continuation.yield(AnalyzerInput(buffer: output))
+        yield(output)
     }
 }
 

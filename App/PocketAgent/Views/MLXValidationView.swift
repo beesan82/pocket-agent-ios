@@ -76,6 +76,7 @@ struct MLXValidationView: View {
             memorySection
             summarySection
             speechSection
+            BilingualGateSection(measurementLog: measurementLog)
         }
         .navigationTitle("MLX 検証")
         .task {

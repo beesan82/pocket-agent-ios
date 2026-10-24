@@ -192,3 +192,17 @@
 - 保存後の「日誌タブへ」導線は未実装（ラベル表示のみ）
 - ユーザーが上にスクロール中の自動追従の抑止（初版は常に末尾へ）
 - 要点テンプレートの選択、同時翻訳（次ステップ）
+
+## 二言語ゲート（段階 A、ADR-035）
+計画: `docs/superpowers/plans/2026-10-24-bilingual-gate.md` / 記入: `docs/bilingual-eval.md`
+
+### 実装済み（CI で自動テスト合格）
+- Core: `LanguageArbiter`（保留 1.5 秒・重なりで 1 組・遅着は破棄・雑音除去）、`ConfidenceMath`、`ScriptGuess`、`BilingualRunStats`（結果 3 行）、`Translating`
+- App: `SpeechCapture(locales: [ja_JP, en_US])`（1 本のマイクを 2 つの analyzer へ、信頼度付き `.candidate`）、英語の可否理由 2 件、`AppleTranslator`、検証画面の「二言語」「翻訳」節
+
+### 実機で未検証（iPhone 15）
+- [ ] 英語の音声データの導入と 2 系統同時認識が動くこと（`transcriptionConfidence` が実際に付くか）
+- [ ] 日本語テスト・英語テストの判定一致と信頼度の分かれ方
+- [ ] 遅延・最小空きメモリ・発熱
+- [ ] 翻訳データの同意シート（方向ごと）と翻訳テストの所要秒
+
