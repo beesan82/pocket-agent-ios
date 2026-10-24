@@ -50,8 +50,6 @@ targets:
       - package: PocketAgentRuntime
       - package: AgentRunKit
         product: AgentRunKit
-      - package: AgentRunKit
-        product: AgentRunKitFoundationModels
       - package: mlx-swift-lm
         product: MLXFoundationModels
       - package: mlx-swift-lm

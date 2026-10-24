@@ -40,7 +40,7 @@ struct ChatView: View {
                 broker: broker,
                 resolve: ChatSession.liveResolver(
                     credentials: credentials, availability: availability, settings: settings),
-                localModel: MLXLocalModelAccess(store: mlxStore, runtime: mlxRuntime),
+                onDevice: LiveOnDeviceModelAccess(store: mlxStore, runtime: mlxRuntime, availability: availability),
                 log: { measurementLog.append($0) })
         }
         .stopsJournalGeneration(runtime: mlxRuntime, stop: {

@@ -1,25 +1,23 @@
 import AgentRunKit
-import AgentRunKitFoundationModels
+import FoundationModels
 import PocketAgentCore
 import PocketAgentRuntime
 
 /// Wires the SDK clients into Core's resolver. Clients are returned unwrapped (see `ClaudeAdapter`).
+/// The chat only resolves Claude here; on-device chat runs through `OnDeviceModelAccess`.
+/// `.appleLocal` still resolves to a tool-less Foundation Models text client so the resolver keeps
+/// its AT-03 / AT-14 guarantees (availability checked first, the key never read).
 enum LLMClientFactory {
-    /// `appleLocalTools` are run by the Foundation Models session itself, bypassing
-    /// AgentRunner's approval policy: they must come from `ToolApprovalGate.wrap` (ADR-009).
     static func resolver(
         credentials: any CredentialStore,
         availability: any ModelAvailabilityChecking,
-        claudeModel: String,
-        appleLocalTools: [any AnyTool<EmptyContext>] = []
+        claudeModel: String
     ) -> ModelBackendResolver<any LLMClient> {
         ModelBackendResolver(
             credentials: credentials,
             availability: availability,
             makeClaude: { key in try ClaudeAdapter.makeClient(apiKey: key, model: claudeModel) },
-            makeAppleLocal: {
-                FoundationModelsClient<EmptyContext>(tools: appleLocalTools, context: EmptyContext())
-            }
+            makeAppleLocal: { FoundationModelsTextClient(model: SystemLanguageModel.default) }
         )
     }
 }

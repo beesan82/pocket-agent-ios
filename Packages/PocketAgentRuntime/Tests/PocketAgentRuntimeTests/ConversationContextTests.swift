@@ -56,55 +56,6 @@ struct ConversationContextTests {
         #expect(ConversationContext.history(from: [], budget: .appleLocal).isEmpty)
     }
 
-    // The on-device model takes one prompt only, so earlier turns are folded into it.
-    @Test func appleLocalPromptWithoutHistoryIsTheMessage() {
-        #expect(ConversationContext.appleLocalPrompt(history: [], message: "やあ") == "やあ")
-        // Only a leading assistant turn: nothing survives trimming.
-        #expect(ConversationContext.appleLocalPrompt(history: [assistant("x")], message: "やあ") == "やあ")
-    }
-
-    @Test func appleLocalPromptLabelsTurnsInOrder() {
-        let prompt = ConversationContext.appleLocalPrompt(
-            history: [user("a"), assistant("b\nc")], message: "d")
-        #expect(prompt == "これまでの会話:\nユーザー: a\nアシスタント: b\nc\n\n今回のメッセージ:\nd")
-    }
-
-    @Test func appleLocalPromptAppliesHistoryBudget() {
-        let many = (0 ..< 8).map { $0 % 2 == 0 ? user("u\($0)") : assistant("a\($0)") }
-        #expect(ConversationContext.appleLocalPrompt(history: many, message: "next") == """
-        これまでの会話:
-        ユーザー: u2
-        アシスタント: a3
-        ユーザー: u4
-        アシスタント: a5
-        ユーザー: u6
-        アシスタント: a7
-
-        今回のメッセージ:
-        next
-        """)
-
-        let z = String(repeating: "z", count: 3000)
-        let big = [user("x"), assistant(String(repeating: "y", count: 2000)), user(z)]
-        #expect(ConversationContext.appleLocalPrompt(history: big, message: "next")
-            == "これまでの会話:\nユーザー: \(z)\n\n今回のメッセージ:\nnext")
-
-        let huge = [user("a"), assistant(String(repeating: "y", count: 4001))]
-        #expect(ConversationContext.appleLocalPrompt(history: huge, message: "next") == "next")
-
-        let custom = ConversationContext.appleLocalPrompt(
-            history: [user("a"), assistant("b"), user("c")], message: "d",
-            budget: HistoryBudget(maxTurns: 1, maxCharacters: nil))
-        #expect(custom == "これまでの会話:\nユーザー: c\n\n今回のメッセージ:\nd")
-    }
-
-    // An earlier turn that got no answer (failure or stop) stays in the transcript.
-    @Test func appleLocalPromptKeepsConsecutiveUserTurns() {
-        let prompt = ConversationContext.appleLocalPrompt(
-            history: [user("a"), assistant("b"), user("c")], message: "d")
-        #expect(prompt == "これまでの会話:\nユーザー: a\nアシスタント: b\nユーザー: c\n\n今回のメッセージ:\nd")
-    }
-
     @Test func systemPromptTreatsPastedTextAsData() {
         let prompt = ConversationContext.systemPrompt
         #expect(prompt.contains("日本語"))
@@ -183,17 +134,5 @@ struct ConversationContextTests {
         #expect(ConversationContext.claudeSystemPrompt(memorySection: nil) == ConversationContext.systemPrompt)
         #expect(ConversationContext.claudeSystemPrompt(memorySection: "M") == ConversationContext.systemPrompt + "\n\nM")
         #expect(ConversationContext.systemPrompt.contains(ConversationContext.memoryRule))
-    }
-
-    @Test func appleLocalPromptPutsMemoryFirstAndShrinksHistoryBudget() {
-        let memory = String(repeating: "m", count: 3200)
-        let turns = [user("古い"), assistant(String(repeating: "y", count: 900)), user("近い")]
-        let prompt = ConversationContext.appleLocalPrompt(history: turns, message: "今", memorySection: memory)
-        #expect(prompt.hasPrefix(memory + "\n\n"))
-        #expect(prompt.contains("ユーザー: 近い") && !prompt.contains("yyy")) // history budget 4000 - 3200 = 800 < 902: newest turn only
-        #expect(prompt.hasSuffix("今回のメッセージ:\n今"))
-        #expect(ConversationContext.appleLocalPrompt(history: [], message: "今", memorySection: "M") == "M\n\n今")
-        #expect(ConversationContext.appleLocalPrompt(history: turns, message: "今", memorySection: nil)
-            == ConversationContext.appleLocalPrompt(history: turns, message: "今"))
     }
 }
