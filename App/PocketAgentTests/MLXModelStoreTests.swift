@@ -85,6 +85,34 @@ final class FakeDownloader: ModelDownloading, @unchecked Sendable {
     }
 }
 
+/// Real local writes continue after cancellation, as a snapshot writer can do.
+private final class DelayedFileDownloader: ModelDownloading, @unchecked Sendable {
+    let started = TestGate()
+    let release = TestGate()
+    private let hub = HubModelDownloader()
+
+    func download(
+        _ model: MLXModelInfo, to base: URL, progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        let directory = HubModelDownloader.directory(of: model, at: base)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("in progress".utf8).write(to: directory.appending(path: "writer.tmp"))
+        started.open()
+        await release.wait()
+        // Intentionally ignores cancellation, and can recreate a prematurely deleted directory.
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("late write".utf8).write(to: directory.appending(path: "writer.tmp"))
+    }
+
+    func isDownloaded(_ model: MLXModelInfo, at base: URL) -> Bool {
+        hub.isDownloaded(model, at: base)
+    }
+
+    func delete(_ model: MLXModelInfo, at base: URL) throws {
+        try hub.delete(model, at: base)
+    }
+}
+
 @MainActor
 struct MLXModelStoreTests {
     private let model = MLXModelRegistry.default
@@ -223,6 +251,28 @@ struct MLXModelStoreTests {
         #expect(!downloader.isDownloaded(model, at: store.baseDirectory))
     }
 
+    @Test(arguments: [false, true])
+    func deleteWaitsForWriterAndRemovesLateWrites(cancelFirst: Bool) async {
+        let base = FileManager.default.temporaryDirectory.appending(path: "HubRace-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let downloader = DelayedFileDownloader()
+        let store = MLXModelStore(downloader: downloader, baseDirectory: base, defaults: makeDefaults())
+        let directory = HubModelDownloader.directory(of: model, at: base)
+
+        #expect(store.startDownload(model, freeBytes: plenty, isExpensiveNetwork: false) == .started)
+        await downloader.started.wait()
+        if cancelFirst { store.cancelDownload() }
+        store.delete(model)
+
+        #expect(FileManager.default.fileExists(atPath: directory.appending(path: "writer.tmp").path))
+        #expect(store.startDownload(model, freeBytes: plenty, isExpensiveNetwork: false) == .busy)
+        downloader.release.open()
+        await store.waitForDownload()
+
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        #expect(store.status(of: model) == .notDownloaded)
+    }
+
     @Test func selectedModelPersistsAndFallsBack() {
         let defaults = makeDefaults()
         let store = makeStore(FakeDownloader(), defaults: defaults)
@@ -244,7 +294,7 @@ struct MLXModelStoreTests {
         #expect(MLXModelRegistry.default.id == "mlx-community/Qwen2.5-1.5B-Instruct-4bit")
     }
 
-    @Test func hubDownloaderChecksConfigAndWeights() throws {
+    @Test func hubDownloaderChecksConfigTokenizerAndWeights() throws {
         let base = FileManager.default.temporaryDirectory.appending(path: "HubCheck-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
         let downloader = HubModelDownloader()
@@ -254,12 +304,167 @@ struct MLXModelStoreTests {
         try Data("{}".utf8).write(to: directory.appending(path: "config.json"))
         #expect(!downloader.isDownloaded(model, at: base))
         try Data().write(to: directory.appending(path: "model.safetensors"))
+        #expect(!downloader.isDownloaded(model, at: base))
+        try tinyWeights().write(to: directory.appending(path: "model.safetensors"))
+        #expect(!downloader.isDownloaded(model, at: base))
+        try Data(validTokenizer.utf8).write(to: directory.appending(path: "tokenizer.json"))
+        try Data(validTokenizerConfig.utf8).write(to: directory.appending(path: "tokenizer_config.json"))
         #expect(downloader.isDownloaded(model, at: base))
 
         try downloader.delete(model, at: base)
         #expect(!downloader.isDownloaded(model, at: base))
         // Deleting again is not an error.
         try downloader.delete(model, at: base)
+    }
+
+    @Test(arguments: ["", "{", "[]", "null"])
+    func hubDownloaderRejectsInvalidConfig(json: String) throws {
+        try withValidModel { base, directory in
+            try Data(json.utf8).write(to: directory.appending(path: "config.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test(arguments: [
+        "", "{", "[]", "{}", #"{"model":{}}"#,
+        #"{"model":{"type":"BPE","vocab":{},"merges":[]}}"#,
+        #"{"model":{"type":"BPE","vocab":{"a":0}}}"#,
+        #"{"model":{"type":"BPE","vocab":{"a":"invalid"},"merges":[]}}"#
+    ])
+    func hubDownloaderRejectsInvalidTokenizer(json: String) throws {
+        try withValidModel { base, directory in
+            try Data(json.utf8).write(to: directory.appending(path: "tokenizer.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func hubDownloaderRequiresTokenizerConfiguration() throws {
+        try withValidModel { base, directory in
+            try FileManager.default.removeItem(at: directory.appending(path: "tokenizer_config.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test(arguments: ["", "{", "[]", "null"])
+    func hubDownloaderRejectsInvalidTokenizerConfiguration(json: String) throws {
+        try withValidModel { base, directory in
+            try Data(json.utf8).write(to: directory.appending(path: "tokenizer_config.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func hubDownloaderRejectsTruncatedWeights() throws {
+        try withValidModel { base, directory in
+            let weights = tinyWeights()
+            // Empty, partial length prefix, partial JSON header, and missing final tensor byte.
+            for count in [0, 4, 12, weights.count - 1] {
+                try Data(weights.prefix(count)).write(to: directory.appending(path: "model.safetensors"))
+                #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            }
+        }
+    }
+
+    @Test(arguments: [
+        "{}",
+        "not json",
+        #"{"weight":{"dtype":"U8","shape":[18446744073709551615,2],"data_offsets":[0,4]}}"#,
+        #"{"weight":{"dtype":"U8","shape":[4],"data_offsets":[0,5]}}"#,
+        #"{"weight":{"dtype":"U8","shape":[4],"data_offsets":[3,2]}}"#,
+        #"{"weight":{"dtype":"F32","shape":[4],"data_offsets":[0,4]}}"#
+    ])
+    func hubDownloaderRejectsInvalidWeightHeaders(header: String) throws {
+        try withValidModel { base, directory in
+            try tinyWeights(header: header).write(to: directory.appending(path: "model.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func hubDownloaderRejectsUnboundedHeaderLength() throws {
+        try withValidModel { base, directory in
+            try Data(repeating: 0xff, count: 8).write(to: directory.appending(path: "model.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func hubDownloaderRejectsIndexPointingToWrongTensor() throws {
+        try withValidModel { base, directory in
+            let index = #"{"weight_map":{"missing_tensor":"model.safetensors"}}"#
+            try Data(index.utf8).write(to: directory.appending(path: "model.safetensors.index.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func hubDownloaderRequiresEveryIndexedShard() throws {
+        try withValidModel { base, directory in
+            try FileManager.default.removeItem(at: directory.appending(path: "model.safetensors"))
+            let index = #"{"weight_map":{"weight":"model-00001-of-00002.safetensors","other":"model-00002-of-00002.safetensors"}}"#
+            try Data(index.utf8).write(to: directory.appending(path: "model.safetensors.index.json"))
+            try tinyWeights().write(to: directory.appending(path: "model-00001-of-00002.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            let second = directory.appending(path: "model-00002-of-00002.safetensors")
+            try Data().write(to: second)
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            try tinyWeights(header: #"{"other":{"dtype":"U8","shape":[4],"data_offsets":[0,4]}}"#).write(to: second)
+            #expect(HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func numberedShardsNeedCompleteSetAndIndex() throws {
+        try withValidModel { base, directory in
+            try FileManager.default.removeItem(at: directory.appending(path: "model.safetensors"))
+            try tinyWeights().write(to: directory.appending(path: "model-00001-of-00002.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            let index = #"{"weight_map":{"weight":"model-00001-of-00002.safetensors"}}"#
+            try Data(index.utf8).write(to: directory.appending(path: "model.safetensors.index.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            try tinyWeights(header: #"{"other":{"dtype":"U8","shape":[4],"data_offsets":[0,4]}}"#)
+                .write(to: directory.appending(path: "model-00002-of-00002.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            let complete = #"{"weight_map":{"weight":"model-00001-of-00002.safetensors","other":"model-00002-of-00002.safetensors"}}"#
+            try Data(complete.utf8).write(to: directory.appending(path: "model.safetensors.index.json"))
+            #expect(HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test(arguments: ["{", "{}", #"{"weight_map":{}}"#, #"{"weight_map":{"weight":"../outside.safetensors"}}"#])
+    func hubDownloaderRejectsInvalidWeightIndex(json: String) throws {
+        try withValidModel { base, directory in
+            try Data(json.utf8).write(to: directory.appending(path: "model.safetensors.index.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    private var validTokenizer: String {
+        #"{"version":"1.0","model":{"type":"BPE","vocab":{"a":0},"merges":[]}}"#
+    }
+
+    private var validTokenizerConfig: String {
+        #"{"tokenizer_class":"Qwen2Tokenizer","eos_token":"a"}"#
+    }
+
+    /// Four real U8 tensor bytes, with a little-endian length and an 8-byte-padded JSON header.
+    private func tinyWeights(
+        header: String = #"{"weight":{"dtype":"U8","shape":[4],"data_offsets":[0,4]}}"#
+    ) -> Data {
+        var json = Data(header.utf8)
+        while json.count % 8 != 0 { json.append(0x20) }
+        var length = UInt64(json.count).littleEndian
+        var data = withUnsafeBytes(of: &length) { Data($0) }
+        data.append(json)
+        data.append(contentsOf: [1, 2, 3, 4])
+        return data
+    }
+
+    private func withValidModel(_ body: (URL, URL) throws -> Void) throws {
+        let base = FileManager.default.temporaryDirectory.appending(path: "HubFiles-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let directory = HubModelDownloader.directory(of: model, at: base)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: directory.appending(path: "config.json"))
+        try Data(validTokenizer.utf8).write(to: directory.appending(path: "tokenizer.json"))
+        try Data(validTokenizerConfig.utf8).write(to: directory.appending(path: "tokenizer_config.json"))
+        try tinyWeights().write(to: directory.appending(path: "model.safetensors"))
+        try body(base, directory)
     }
 
     @Test func hubDownloaderThrowsOnSimulator() async {

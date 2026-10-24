@@ -7,6 +7,8 @@ struct CaptureRequest: Identifiable {
     let id = UUID()
     let source: JournalEntry.Source
     let transcript: String
+    var draft: JournalDraft? = nil
+    var resumesDraft = false
 }
 
 /// Confirm a capture: edit the text, watch the on-device summary, save.
@@ -19,6 +21,7 @@ struct JournalCaptureView: View {
     let mlxRuntime: MLXRuntime
     let measurementLog: MeasurementLog
     let onSaved: () -> Void
+    @Environment(JournalDraftStore.self) private var drafts
 
     @Environment(\.dismiss) private var dismiss
     @State private var session: JournalCaptureSession?
@@ -60,12 +63,27 @@ struct JournalCaptureView: View {
                     Button("キャンセル") {
                         if hasUnsavedText { confirmDiscard = true } else { dismiss() }
                     }
+                    .disabled(session?.phase == .saving)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("後で続ける") {
+                        stopGeneration()
+                        session?.checkpointDraft()
+                        if drafts.errorMessage == nil { dismiss() }
+                    }
+                    .disabled(session == nil || session?.phase == .saving)
                 }
             }
             .confirmationDialog(
                 "この記録を破棄しますか？（保存されません）", isPresented: $confirmDiscard, titleVisibility: .visible
             ) {
-                Button("破棄", role: .destructive) { dismiss() }
+                Button("破棄", role: .destructive) {
+                    stopGeneration()
+                    do {
+                        if let session { try session.discardDraft() } else { try drafts.clear() }
+                        dismiss()
+                    } catch { /* The draft error stays visible. */ }
+                }
                 Button("戻る", role: .cancel) {}
             }
         }
@@ -83,7 +101,10 @@ struct JournalCaptureView: View {
                 dismiss()
             }
         }
-        .onDisappear { stopGeneration() }
+        .onDisappear {
+            stopGeneration()
+            session?.checkpointDraft()
+        }
     }
 
     /// Ends a model load started by 「要約する」 and a running summary; the texts stay.
@@ -118,9 +139,12 @@ struct JournalCaptureView: View {
         let created = JournalCaptureSession(
             source: request.source, store: journal,
             assistant: client.map { JournalModelAccess.assistant(client: $0, backend: current) },
-            modelReady: client != nil)
-        created.transcript = request.transcript
+            modelReady: client != nil, drafts: drafts, restoring: request.draft)
+        if request.draft == nil { created.transcript = request.transcript }
         session = created
+        created.checkpointDraft()
+        // Recovery is explicit; restarting the app never starts inference by itself.
+        guard !request.resumesDraft else { return }
         if client != nil {
             created.beginIfNeeded(isForeground: isForeground)
             return
@@ -138,6 +162,7 @@ struct JournalCaptureView: View {
 }
 
 private struct CaptureForm: View {
+    @Environment(JournalDraftStore.self) private var drafts
     @Bindable var session: JournalCaptureSession
     let mlxStore: MLXModelStore
     let mlxRuntime: MLXRuntime
@@ -157,6 +182,12 @@ private struct CaptureForm: View {
 
     var body: some View {
         Form {
+            if let message = drafts.errorMessage {
+                Section {
+                    Text(message).foregroundStyle(.red)
+                    Button("下書き保存を再試行") { session.checkpointDraft() }
+                }
+            }
             Section("本文") {
                 TextEditor(text: $session.transcript)
                     .frame(minHeight: 120)
@@ -165,6 +196,13 @@ private struct CaptureForm: View {
 
             if isSummarizing || session.hasSummary {
                 Section {
+                    if session.isSummaryStale {
+                        Text(JournalCaptureSession.staleSummaryText).foregroundStyle(.orange)
+                    }
+                    if session.isSummaryPartial {
+                        Text("途中で停止した要約です。内容を確認してから保存してください。")
+                            .foregroundStyle(.orange)
+                    }
                     TextField("見出し", text: $session.summaryTitle)
                         .disabled(isSummarizing || isBusy)
                     TextEditor(text: $session.summaryBody)
@@ -211,7 +249,7 @@ private struct CaptureForm: View {
 
             Section {
                 Button("保存") { save(useTranscriptOnly: false) }
-                    .disabled(isBusy || isSummarizing || isEmpty)
+                    .disabled(isBusy || isSummarizing || isEmpty || session.isSummaryStale)
                 Button("原文のまま保存") { save(useTranscriptOnly: true) }
                     .disabled(isBusy || isEmpty)
             }

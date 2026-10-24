@@ -233,6 +233,46 @@ struct JournalCaptureSessionTests {
         #expect(session.summaryTitle == "散歩")
         #expect(session.summaryBody == "散歩した。")
     }
+
+    @Test func editedTranscriptCannotSaveStaleSummary() async throws {
+        let store = InMemoryJournalStore()
+        let session = JournalCaptureSession(source: .text, store: store,
+            assistant: FakeJournalAssistant(summaryChunks: ["見出し: 予算\n予算は10万円。"]), modelReady: true)
+        session.transcript = "予算は10万円"
+        session.summarize()
+        await session.summaryTask?.value
+        session.transcript = "予算は100万円"
+
+        await session.save(useTranscriptOnly: false)
+
+        #expect(try await store.all().isEmpty)
+        #expect(session.isSummaryStale)
+        await session.save(useTranscriptOnly: true)
+        #expect(try await store.all().map(\.body) == ["予算は100万円"])
+    }
+
+    @Test func editDuringGenerationRequiresNewSummary() async throws {
+        let probe = StreamProbe()
+        let store = InMemoryJournalStore()
+        let session = JournalCaptureSession(source: .text, store: store,
+            assistant: FakeJournalAssistant(summaryChunks: ["見出し: 予算\n10万円"], probe: probe), modelReady: true)
+        session.transcript = "10万円"
+        session.summarize()
+        #expect(try await waitForJournal { session.summaryBody == "10万円" })
+        session.transcript = "100万円"
+        session.stopSummary()
+        #expect(session.isSummaryPartial)
+        await session.save(useTranscriptOnly: false)
+        #expect(try await store.all().isEmpty)
+
+        session.assistant = FakeJournalAssistant(summaryChunks: ["見出し: 修正\n100万円です。"])
+        session.summarize()
+        await session.summaryTask?.value
+        #expect(!session.isSummaryStale)
+        #expect(!session.isSummaryPartial)
+        await session.save(useTranscriptOnly: false)
+        #expect(try await store.all().map(\.body) == ["100万円です。"])
+    }
 }
 
 /// Polls `condition` on the main actor (the sessions update there).

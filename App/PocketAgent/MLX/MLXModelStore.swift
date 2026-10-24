@@ -50,12 +50,7 @@ struct HubModelDownloader: ModelDownloading {
     }
 
     func isDownloaded(_ model: MLXModelInfo, at base: URL) -> Bool {
-        let directory = Self.directory(of: model, at: base)
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: directory.appending(path: "config.json").path(percentEncoded: false))
-        else { return false }
-        let names = (try? fileManager.contentsOfDirectory(atPath: directory.path(percentEncoded: false))) ?? []
-        return names.contains { $0.hasSuffix(".safetensors") }
+        ModelFileValidator.isComplete(at: Self.directory(of: model, at: base))
     }
 
     func delete(_ model: MLXModelInfo, at base: URL) throws {
@@ -108,6 +103,9 @@ final class MLXModelStore {
     @ObservationIgnored private var activeTask: Task<Void, Never>?
     /// Model whose status the running download owns; nil once cancelled.
     @ObservationIgnored private var activeModelID: String?
+    /// Unlike activeModelID, remains set while a cancelled download can still write.
+    @ObservationIgnored private var writingModelID: String?
+    @ObservationIgnored private var deleteAfterDownload = false
     @ObservationIgnored private var activeToken: UUID?
 
     init(
@@ -129,7 +127,7 @@ final class MLXModelStore {
 
     /// Re-reads the files on disk for every model that is not downloading.
     func refresh() {
-        for model in MLXModelRegistry.all where model.id != activeModelID {
+        for model in MLXModelRegistry.all where model.id != writingModelID {
             statuses[model.id] = downloader.isDownloaded(model, at: baseDirectory) ? .downloaded : .notDownloaded
         }
     }
@@ -146,6 +144,7 @@ final class MLXModelStore {
         let token = UUID()
         activeToken = token
         activeModelID = model.id
+        writingModelID = model.id
         statuses[model.id] = .downloading(0)
         let downloader = downloader
         let base = baseDirectory
@@ -171,17 +170,29 @@ final class MLXModelStore {
         activeTask?.cancel()
         activeModelID = nil
         activeToken = nil
-        statuses[modelID] = diskStatus(of: modelID)
+        // A cancelled writer may still be changing the files. Do not offer them
+        // for inference until finishDownload has revalidated the final directory.
+        statuses[modelID] = .notDownloaded
     }
 
     func delete(_ model: MLXModelInfo) {
-        if activeModelID == model.id { cancelDownload() }
+        if writingModelID == model.id {
+            deleteAfterDownload = true
+            cancelDownload()
+            statuses[model.id] = .notDownloaded
+            // The writer may ignore cancellation. Keep its files until finishDownload runs.
+            return
+        }
         do {
             try downloader.delete(model, at: baseDirectory)
             statuses[model.id] = .notDownloaded
         } catch {
             statuses[model.id] = .failed(Self.deleteFailedText)
         }
+    }
+
+    func isDeletionPending(_ model: MLXModelInfo) -> Bool {
+        writingModelID == model.id && deleteAfterDownload
     }
 
     /// Waits until the current (or cancelled) download task has ended.
@@ -197,6 +208,14 @@ final class MLXModelStore {
 
     private func finishDownload(_ outcome: Result<Void, any Error>, token: UUID, model: MLXModelInfo) {
         activeTask = nil
+        writingModelID = nil
+        if deleteAfterDownload {
+            deleteAfterDownload = false
+            activeModelID = nil
+            activeToken = nil
+            delete(model)
+            return
+        }
         // Cancelled: re-read the disk, the task may have finished some files.
         guard activeToken == token else {
             statuses[model.id] = diskStatus(of: model.id)

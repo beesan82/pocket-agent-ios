@@ -174,7 +174,9 @@ struct JournalPersistenceTests {
 
         try await DataReset.eraseAll(
             context: context, journal: journal, credentials: SpyCredentialStore(key: "test-key"),
-            githubToken: SpyCredentialStore(key: "test-token-123"))
+            githubToken: SpyCredentialStore(key: "test-token-123"),
+            measurementLog: MeasurementLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "log-\(UUID())")),
+            drafts: JournalDraftStore(fileURL: FileManager.default.temporaryDirectory.appending(path: "draft-\(UUID())")))
 
         #expect(try context.fetchCount(FetchDescriptor<NoteRecord>()) == 0)
     }
@@ -188,11 +190,22 @@ struct JournalPersistenceTests {
         let githubToken = SpyCredentialStore(key: "test-token-123")
         #expect(try context.fetchCount(FetchDescriptor<JournalEntryRecord>()) == 2)
 
-        try await DataReset.eraseAll(context: context, journal: journal, credentials: credentials, githubToken: githubToken)
+        try await DataReset.eraseAll(context: context, journal: journal, credentials: credentials, githubToken: githubToken,
+            measurementLog: MeasurementLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "log-\(UUID())")),
+            drafts: JournalDraftStore(fileURL: FileManager.default.temporaryDirectory.appending(path: "draft-\(UUID())")))
 
         #expect(try await journal.all().isEmpty)
         #expect(try context.fetchCount(FetchDescriptor<JournalEntryRecord>()) == 0)
         #expect(credentials.deletes == 1)
+    }
+
+    @Test func retryingCaptureIDReturnsExistingEntryWithoutOverwriting() async throws {
+        let store = SwiftDataJournalStore(modelContainer: container)
+        let id = UUID()
+        _ = try await store.add(NewJournalEntry(source: .text, origin: .journal, body: "保存済み", id: id))
+        let retried = try await store.add(NewJournalEntry(source: .text, origin: .journal, body: "再試行", id: id))
+        #expect(retried.body == "保存済み")
+        #expect(try await store.all().count == 1)
     }
 
     @Test func noteToolsSeeOnlyNoteToolEntries() async throws {

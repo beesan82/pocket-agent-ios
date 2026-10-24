@@ -63,7 +63,16 @@ final class ModelDownloadFlow {
     func confirmDelete(_ model: MLXModelInfo) {
         runtime.modelDeleted(model)
         store.delete(model)
-        measurementLog.append("モデル削除: \(model.displayName)")
+        if store.isDeletionPending(model) {
+            message = "ダウンロードの書き込み終了を待ってモデルを削除します。"
+            measurementLog.append("モデル削除要求（書き込み終了待ち）: \(model.displayName)")
+        } else if case .failed = store.status(of: model) {
+            message = MLXModelStore.deleteFailedText
+            measurementLog.append("モデル削除失敗: \(model.displayName)")
+        } else {
+            message = nil
+            measurementLog.append("モデル削除: \(model.displayName)")
+        }
     }
 
     func confirmationText(_ pending: PendingDownload) -> String {

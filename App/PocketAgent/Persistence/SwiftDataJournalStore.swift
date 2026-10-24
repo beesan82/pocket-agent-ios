@@ -6,9 +6,10 @@ import SwiftData
 @ModelActor
 actor SwiftDataJournalStore: JournalStore {
     func add(_ entry: NewJournalEntry) async throws -> JournalEntry {
+        if let id = entry.id, let existing = try fetchRecord(id: id).flatMap(Self.entry(from:)) { return existing }
         let sequence = try Self.nextSequence(in: modelContext)
         let record = JournalEntryRecord(
-            createdAt: Date(), sequence: sequence,
+            id: entry.id ?? UUID(), createdAt: Date(), sequence: sequence,
             sourceRaw: entry.source.rawValue, originRaw: entry.origin.rawValue,
             body: entry.body, transcript: entry.transcript, title: entry.title)
         modelContext.insert(record)
