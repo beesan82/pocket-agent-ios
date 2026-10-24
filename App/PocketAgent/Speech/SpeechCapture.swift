@@ -147,13 +147,18 @@ final class SpeechCapture: TranscriptSource {
             self.pipeline = pipeline
             let lanes = pipeline.lanes
             let bilingual = isBilingual
-            resultsTask = Task { [weak self] in
-                await withTaskGroup(of: Void.self) { group in
-                    for lane in lanes {
-                        group.addTask { @MainActor [weak self] in
-                            await self?.consume(lane.transcriber, language: bilingual ? lane.language : nil)
-                        }
-                    }
+            // One main-actor task per language; `resultsTask` ends when all of them have ended and
+            // cancelling it cancels them.
+            let laneTasks = lanes.map { lane in
+                let transcriber = lane.transcriber
+                let language = bilingual ? lane.language : nil
+                return Task { [weak self] in await self?.consume(transcriber, language: language) }
+            }
+            resultsTask = Task {
+                await withTaskCancellationHandler {
+                    for task in laneTasks { await task.value }
+                } onCancel: {
+                    laneTasks.forEach { $0.cancel() }
                 }
             }
             try activateSession()
