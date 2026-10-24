@@ -8,6 +8,9 @@ import HuggingFace
 /// Thrown by the real MLX/Hub implementations on the simulator, where MLX cannot run.
 struct MLXUnsupportedOnSimulator: Error {}
 
+/// The model id is not a Hugging Face repo id ("owner/name"), so nothing can be downloaded.
+struct MLXModelIDInvalid: Error {}
+
 protocol ModelDownloading: Sendable {
     func download(
         _ model: MLXModelInfo, to base: URL, progress: @escaping @Sendable (Double) -> Void
@@ -39,7 +42,7 @@ struct HubModelDownloader: ModelDownloading {
         var baseURL = base
         try? baseURL.setResourceValues(excluded)
 
-        guard let repo = Repo.ID(rawValue: model.id) else { throw MLXModelFilesMissing() }
+        guard let repo = Repo.ID(rawValue: model.id) else { throw MLXModelIDInvalid() }
         // No cache: files go straight into the model directory (a cache would keep a second copy).
         let hub = HubClient(cache: nil)
         _ = try await hub.downloadSnapshot(

@@ -125,6 +125,10 @@ private struct ChatContent: View {
             Button("キャンセル", role: .cancel) {}
         }
         .onDisappear { stopRecording() }
+        // A recording that fails on its own (e.g. an interruption) keeps what was recognized so far.
+        .onChange(of: speech.state) { old, new in
+            if case .failed = new, old == .recording { applyRecognized() }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -262,14 +266,18 @@ private struct ChatContent: View {
         let wasRecording = speech.state == .recording
         Task {
             await speech.stop()
-            guard wasRecording, case .idle = speech.state else { return }  // a failure shows in `speech.state`
-            let merged = ChatVoiceInput.merge(existing: input, recognized: speech.finalText)
-            if merged == input {
-                speechMessage = ChatVoiceInput.nothingRecognizedText
-            } else {
-                input = merged
-            }
+            guard wasRecording else { return }  // stopped while preparing: nothing was recorded
+            applyRecognized()
         }
+    }
+
+    /// Fills the field from what was recognized (also after a failure, which shows its own message).
+    private func applyRecognized() {
+        var failed = false
+        if case .failed = speech.state { failed = true }
+        let outcome = ChatVoiceInput.afterStop(existing: input, recognized: speech.finalText, failed: failed)
+        input = outcome.input
+        speechMessage = outcome.message
     }
 
     private func installAssets() {
