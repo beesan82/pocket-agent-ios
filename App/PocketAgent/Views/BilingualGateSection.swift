@@ -204,7 +204,7 @@ struct BilingualGateSection: View {
     }
 
     private func finishRun(_ language: String) {
-        decisions += arbiter.drain()
+        decisions += arbiter.drain(now: capture.elapsed)
         let stats = BilingualRunStats(
             expected: language, decisions: decisions,
             minAvailableMB: minAvailable.map { Int((Double($0) / 1_048_576).rounded()) })

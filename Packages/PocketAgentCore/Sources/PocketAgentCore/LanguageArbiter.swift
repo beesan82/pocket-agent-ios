@@ -85,12 +85,19 @@ public struct ArbiterDecision: Sendable, Equatable {
     public let accepted: [LaneCandidate]
     public let rejected: [LaneCandidate]
     public let reason: Reason
+    /// When the decision was made (capture clock): the moment the accepted text can be shown.
+    /// 0 means unknown (then the candidates' arrival counts).
+    public let decidedAt: TimeInterval
 
-    public init(language: String?, accepted: [LaneCandidate], rejected: [LaneCandidate], reason: Reason) {
+    public init(
+        language: String?, accepted: [LaneCandidate], rejected: [LaneCandidate], reason: Reason,
+        decidedAt: TimeInterval = 0
+    ) {
         self.language = language
         self.accepted = accepted
         self.rejected = rejected
         self.reason = reason
+        self.decidedAt = decidedAt
     }
 }
 
@@ -128,18 +135,24 @@ public struct LanguageArbiter: Sendable {
     public mutating func submit(_ candidate: LaneCandidate) -> [ArbiterDecision] {
         var decisions = flush(now: candidate.arrivedAt)
         if decided.contains(where: { Self.overlaps($0.start, $0.end, candidate.start, candidate.end) }) {
-            decisions.append(ArbiterDecision(language: nil, accepted: [], rejected: [candidate], reason: .late))
+            decisions.append(ArbiterDecision(
+                language: nil, accepted: [], rejected: [candidate], reason: .late, decidedAt: candidate.arrivedAt))
             return decisions
         }
-        if let index = groups.firstIndex(where: { Self.overlaps($0.start, $0.end, candidate.start, candidate.end) }) {
-            groups[index].candidates.append(candidate)
-            groups[index].start = min(groups[index].start, candidate.start)
-            groups[index].end = max(groups[index].end, candidate.end)
-        } else {
-            groups.append(Group(
-                candidates: [candidate], start: candidate.start, end: candidate.end,
-                deadline: candidate.arrivedAt + Self.holdSeconds))
+        // A candidate may bridge several held groups (one lane split what the other heard as one): merge them.
+        let overlapping = groups.indices.filter {
+            Self.overlaps(groups[$0].start, groups[$0].end, candidate.start, candidate.end)
         }
+        var merged = Group(
+            candidates: [candidate], start: candidate.start, end: candidate.end,
+            deadline: candidate.arrivedAt + Self.holdSeconds)
+        for index in overlapping.reversed() {
+            let group = groups.remove(at: index)
+            merged = Group(
+                candidates: group.candidates + merged.candidates, start: min(group.start, merged.start),
+                end: max(group.end, merged.end), deadline: min(group.deadline, merged.deadline))
+        }
+        groups.insert(merged, at: min(overlapping.first ?? groups.endIndex, groups.endIndex))
         return decisions
     }
 
@@ -148,28 +161,26 @@ public struct LanguageArbiter: Sendable {
         decided.removeAll { $0.end < now - Self.decidedMemory }
         var decisions: [ArbiterDecision] = []
         while let index = groups.firstIndex(where: { now + 1e-9 >= $0.deadline }) {
-            decisions.append(decide(groups.remove(at: index)))
+            decisions.append(decide(groups.remove(at: index), at: now))
         }
         return decisions
     }
 
-    /// Decides everything still held (at the end of a capture).
-    public mutating func drain() -> [ArbiterDecision] {
+    /// Decides everything still held (at the end of a capture). Without `now`, each group counts
+    /// as decided when its last candidate arrived.
+    public mutating func drain(now: TimeInterval? = nil) -> [ArbiterDecision] {
         let pending = groups
         groups = []
-        return pending.map { decide($0) }
+        return pending.map { decide($0, at: now ?? ($0.candidates.map(\.arrivedAt).max() ?? 0)) }
     }
 
-    private mutating func decide(_ group: Group) -> ArbiterDecision {
+    private mutating func decide(_ group: Group, at time: TimeInterval) -> ArbiterDecision {
         let byLanguage = Dictionary(grouping: group.candidates, by: \.language)
-        let decision: ArbiterDecision
-        if byLanguage.count >= 2 {
-            decision = compare(byLanguage)
-        } else {
-            decision = single(group.candidates)
-        }
-        decided.append(DecidedSpan(language: decision.language, start: group.start, end: group.end))
-        return decision
+        let judged = byLanguage.count >= 2 ? compare(byLanguage) : single(group.candidates)
+        decided.append(DecidedSpan(language: judged.language, start: group.start, end: group.end))
+        return ArbiterDecision(
+            language: judged.language, accepted: judged.accepted, rejected: judged.rejected,
+            reason: judged.reason, decidedAt: time)
     }
 
     private func compare(_ byLanguage: [String: [LaneCandidate]]) -> ArbiterDecision {
