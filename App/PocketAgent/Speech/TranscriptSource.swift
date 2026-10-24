@@ -1,3 +1,4 @@
+import Foundation
 import PocketAgentCore
 
 /// What a live transcription reports while it runs.
