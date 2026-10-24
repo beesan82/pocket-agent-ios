@@ -28,3 +28,6 @@ xcuserdata/
 # TestFlight feedback pulled by tools/asc_feedback.py (screenshots may contain personal text)
 .feedback/
 __pycache__/
+
+# superpowers scratch (brainstorm mockups, plan ledgers)
+.superpowers/
