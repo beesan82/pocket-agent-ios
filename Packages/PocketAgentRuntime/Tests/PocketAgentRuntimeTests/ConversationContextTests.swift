@@ -56,6 +56,16 @@ struct ConversationContextTests {
         #expect(ConversationContext.history(from: [], budget: .appleLocal).isEmpty)
     }
 
+    // Qwen2.5 1.5B on device (2026-10-24): 「覚えておいて」 got no tool call, 「記録してください」 did.
+    // The everyday phrasings must be tied to save_note by name.
+    @Test func systemPromptTiesRememberPhrasesToSaveNote() {
+        let prompt = ConversationContext.systemPrompt
+        for phrase in ["覚えておいて", "覚えて", "メモして", "記録して"] {
+            #expect(prompt.contains("「\(phrase)」"))
+        }
+        #expect(prompt.contains("save_note"))
+    }
+
     @Test func systemPromptTreatsPastedTextAsData() {
         let prompt = ConversationContext.systemPrompt
         #expect(prompt.contains("日本語"))
