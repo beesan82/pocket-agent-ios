@@ -114,6 +114,54 @@ struct JournalLookupTests {
         #expect(found.map(\.text.count).reduce(0, +) <= JournalLookupBudget.appleLocal.maxTotalCharacters)
     }
 
+    // Review 2026-10-24: entries matching more of the terms come first, then the newest.
+    @Test func rankedByMatchedTerms() async throws {
+        let store = try await store([
+            (date(2026, 10, 1, 7), journal("ポチの散歩 朝7時")),
+            (date(2026, 10, 20, 7), journal("散歩した"))
+        ])
+        let found = try await find("ポチの散歩はいつ？", store)
+        #expect(found.map(\.entry.body) == ["ポチの散歩 朝7時", "散歩した"])
+    }
+
+    // One read of the store per turn, not one search per term.
+    @Test func storeIsNotSearchedPerTerm() async throws {
+        let inner = try await store([(date(2026, 10, 1, 7), journal("ポチの散歩 朝7時"))])
+        let counting = CountingJournalStore(inner: inner)
+        _ = try await JournalLookup.find(
+            question: "ポチの散歩と犬の名前とごはんの時間", store: counting, now: now, calendar: calendar, budget: .claude)
+        #expect(await counting.searchCalls == 0)
+        #expect(await counting.reads == 1)
+    }
+
+    @Test func excerptMatchingIgnoresCase() async throws {
+        let transcript = String(repeating: "あ", count: 200) + "Claudeに要約を頼んだ" + String(repeating: "い", count: 200)
+        let store = try await store([
+            (date(2026, 10, 1, 10), journal("なし", title: "定例", transcript: transcript))
+        ])
+        let found = try await find("claudeに何を頼んだ？", store)
+        #expect(found.first?.text.contains("Claudeに要約を頼んだ") == true)
+    }
+
+    // The title has 会議 but only the transcript has 結論: the excerpt is still added.
+    @Test func excerptIsDecidedPerTerm() async throws {
+        let transcript = String(repeating: "あ", count: 200) + "結論は来週に持ち越し" + String(repeating: "い", count: 200)
+        let store = try await store([
+            (date(2026, 10, 1, 10), journal("なし", title: "定例会議", transcript: transcript))
+        ])
+        let found = try await find("会議の結論は？", store)
+        #expect(found.first?.text.contains("結論は来週に持ち越し") == true)
+    }
+
+    // The section's header, date line and each line's "- [date] " prefix count toward the budget.
+    @Test func budgetCountsSectionOverhead() async throws {
+        let long = String(repeating: "会議の記録。", count: 100)
+        let store = try await store((1...10).map { (date(2026, 10, $0, 10), journal(long)) })
+        let found = try await find("会議", store, budget: .appleLocal)
+        let section = try #require(ConversationContext.journalLookupSection(found, now: now))
+        #expect(section.count <= JournalLookupBudget.appleLocal.maxTotalCharacters)
+    }
+
     @Test func budgets() {
         #expect(JournalLookupBudget.claude.maxTotalCharacters == 6000)
         #expect(JournalLookupBudget.appleLocal.maxTotalCharacters == 800)
@@ -150,4 +198,32 @@ struct JournalLookupTests {
         #expect(section?.contains(ConversationContext.journalHeader) == false)
         #expect(section?.contains("散歩") == false)
     }
+}
+
+/// Counts how the lookup reads the store.
+private actor CountingJournalStore: JournalStore {
+    let inner: InMemoryJournalStore
+    private(set) var searchCalls = 0
+    private(set) var reads = 0
+
+    init(inner: InMemoryJournalStore) { self.inner = inner }
+
+    func add(_ entry: NewJournalEntry) async throws -> JournalEntry { try await inner.add(entry) }
+    func all() async throws -> [JournalEntry] {
+        reads += 1
+        return try await inner.all()
+    }
+    func search(_ query: String) async throws -> [JournalEntry] {
+        searchCalls += 1
+        return try await inner.search(query)
+    }
+    func entries(in interval: DateInterval) async throws -> [JournalEntry] {
+        reads += 1
+        return try await inner.entries(in: interval)
+    }
+    func recent(limit: Int) async throws -> [JournalEntry] { try await inner.recent(limit: limit) }
+    func entry(id: UUID) async throws -> JournalEntry? { try await inner.entry(id: id) }
+    func update(id: UUID, body: String) async throws -> JournalEntry? { try await inner.update(id: id, body: body) }
+    func delete(id: UUID) async throws -> Bool { try await inner.delete(id: id) }
+    func deleteAll() async throws { try await inner.deleteAll() }
 }

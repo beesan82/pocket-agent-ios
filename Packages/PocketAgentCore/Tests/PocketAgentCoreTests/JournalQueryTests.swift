@@ -105,8 +105,20 @@ struct JournalQueryTests {
     // drop hiragana runs (particles and endings).
     @Test func keywordsDropParticlesAndQuestionWords() {
         #expect(SearchTerms.keywords(question: "ポチの散歩はいつ？") == ["ポチ", "散歩"])
-        #expect(SearchTerms.keywords(question: "先週の会議の結論は？") == ["先週", "会議", "結論"])
-        #expect(SearchTerms.keywords(question: "うちの犬の名前はココだよ") == ["犬", "名前", "ココ"])
+        #expect(SearchTerms.keywords(question: "先週の会議の結論は？") == ["会議", "結論"])
+        #expect(SearchTerms.keywords(question: "うちの犬の名前はココだよ") == ["名前", "ココ"])
+    }
+
+    // Review 2026-10-24: a single kanji like 私 matches almost everything, so it is dropped when a
+    // longer term exists; date words are handled as the date range, not as terms.
+    @Test func keywordsDropSingleKanjiWhenLongerTermsExist() {
+        #expect(SearchTerms.keywords(question: "私の予定は？") == ["予定"])
+        #expect(SearchTerms.keywords(question: "犬") == ["犬"])
+    }
+
+    @Test func keywordsDropRelativeDateWords() {
+        #expect(SearchTerms.keywords(question: "今日の予定") == ["予定"])
+        #expect(SearchTerms.keywords(question: "昨日と一昨日と先月") == [])
     }
 
     @Test func keywordsOfAQuestionWordAloneAreEmpty() {
