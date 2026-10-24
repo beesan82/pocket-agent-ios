@@ -251,12 +251,13 @@ struct BilingualGateSection: View {
         .buttonStyle(.bordered)
         // The download consent sheet can only come from a view's session.
         .translationTask(translationConfig) { session in
+            let pair = Self.pairName(session)
             do {
-                try await session.prepareTranslation()
-                measurementLog.append("翻訳データ導入: \(Self.pairName(session))")
+                try await Self.prepare(SessionBox(session: session))
+                measurementLog.append("翻訳データ導入: \(pair)")
             } catch {
                 translationMessage = Self.downloadFailedText
-                measurementLog.append("翻訳データ導入失敗: \(Self.pairName(session))")
+                measurementLog.append("翻訳データ導入失敗: \(pair)")
             }
             await refreshPairs()
             translationConfig = nil
@@ -267,6 +268,16 @@ struct BilingualGateSection: View {
         ["ja>en", "en>ja"].compactMap { key in
             translationAverages[key].map { "翻訳 \(key.replacingOccurrences(of: ">", with: "→")) 平均 " + String(format: "%.1f 秒", $0) }
         }
+    }
+
+    /// The view's session only presents the consent sheet; it is used once, here, and never again.
+    private struct SessionBox: @unchecked Sendable {
+        let session: TranslationSession
+    }
+
+    @concurrent
+    private nonisolated static func prepare(_ box: SessionBox) async throws {
+        try await box.session.prepareTranslation()
     }
 
     private static func pairName(_ session: TranslationSession) -> String {
