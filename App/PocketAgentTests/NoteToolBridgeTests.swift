@@ -37,7 +37,7 @@ struct NoteToolBridgeTests {
     @Test func invokeThroughGateDeniedDoesNotSave() async throws {
         let store = InMemoryNoteStore()
         let gated = ToolApprovalGate.wrap(
-            NoteTools.make(store: store, limit: .appleLocal), approval: { _ in .deny(nil) })
+            NoteTools.make(store: store, limit: .appleLocal), approval: { _ in .deny(reason: nil) })
 
         let result = try await NoteToolBridge.invoke("save_note", argumentsJSON: #"{"text":"牛乳"}"#, tools: gated)
 
