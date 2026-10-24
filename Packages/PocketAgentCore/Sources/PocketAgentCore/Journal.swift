@@ -33,8 +33,10 @@ public struct JournalEntry: Sendable, Equatable, Identifiable {
     }
 }
 
-/// Input for `JournalStore.add`; the store assigns id and createdAt.
+/// Input for `JournalStore.add`; the store assigns createdAt and, by default, id.
+/// A supplied id makes retrying the same capture idempotent.
 public struct NewJournalEntry: Sendable {
+    public let id: UUID?
     public let source: JournalEntry.Source
     public let origin: JournalEntry.Origin
     public let body: String
@@ -43,8 +45,9 @@ public struct NewJournalEntry: Sendable {
 
     public init(
         source: JournalEntry.Source, origin: JournalEntry.Origin, body: String,
-        transcript: String? = nil, title: String? = nil
+        transcript: String? = nil, title: String? = nil, id: UUID? = nil
     ) {
+        self.id = id
         self.source = source
         self.origin = origin
         self.body = body
@@ -78,8 +81,9 @@ public actor InMemoryJournalStore: JournalStore {
     }
 
     public func add(_ entry: NewJournalEntry) async throws -> JournalEntry {
+        if let id = entry.id, let existing = stored.first(where: { $0.id == id }) { return existing }
         let added = JournalEntry(
-            createdAt: now(), source: entry.source, origin: entry.origin, body: entry.body,
+            id: entry.id ?? UUID(), createdAt: now(), source: entry.source, origin: entry.origin, body: entry.body,
             transcript: entry.transcript, title: entry.title
         )
         stored.append(added)

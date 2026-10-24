@@ -308,6 +308,7 @@ struct MLXModelStoreTests {
         try tinyWeights().write(to: directory.appending(path: "model.safetensors"))
         #expect(!downloader.isDownloaded(model, at: base))
         try Data(validTokenizer.utf8).write(to: directory.appending(path: "tokenizer.json"))
+        try Data(validTokenizerConfig.utf8).write(to: directory.appending(path: "tokenizer_config.json"))
         #expect(downloader.isDownloaded(model, at: base))
 
         try downloader.delete(model, at: base)
@@ -324,10 +325,30 @@ struct MLXModelStoreTests {
         }
     }
 
-    @Test(arguments: ["", "{", "[]", "{}", #"{"model":{}}"#])
+    @Test(arguments: [
+        "", "{", "[]", "{}", #"{"model":{}}"#,
+        #"{"model":{"type":"BPE","vocab":{},"merges":[]}}"#,
+        #"{"model":{"type":"BPE","vocab":{"a":0}}}"#,
+        #"{"model":{"type":"BPE","vocab":{"a":"invalid"},"merges":[]}}"#
+    ])
     func hubDownloaderRejectsInvalidTokenizer(json: String) throws {
         try withValidModel { base, directory in
             try Data(json.utf8).write(to: directory.appending(path: "tokenizer.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func hubDownloaderRequiresTokenizerConfiguration() throws {
+        try withValidModel { base, directory in
+            try FileManager.default.removeItem(at: directory.appending(path: "tokenizer_config.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test(arguments: ["", "{", "[]", "null"])
+    func hubDownloaderRejectsInvalidTokenizerConfiguration(json: String) throws {
+        try withValidModel { base, directory in
+            try Data(json.utf8).write(to: directory.appending(path: "tokenizer_config.json"))
             #expect(!HubModelDownloader().isDownloaded(model, at: base))
         }
     }
@@ -346,6 +367,7 @@ struct MLXModelStoreTests {
     @Test(arguments: [
         "{}",
         "not json",
+        #"{"weight":{"dtype":"U8","shape":[18446744073709551615,2],"data_offsets":[0,4]}}"#,
         #"{"weight":{"dtype":"U8","shape":[4],"data_offsets":[0,5]}}"#,
         #"{"weight":{"dtype":"U8","shape":[4],"data_offsets":[3,2]}}"#,
         #"{"weight":{"dtype":"F32","shape":[4],"data_offsets":[0,4]}}"#
@@ -353,6 +375,21 @@ struct MLXModelStoreTests {
     func hubDownloaderRejectsInvalidWeightHeaders(header: String) throws {
         try withValidModel { base, directory in
             try tinyWeights(header: header).write(to: directory.appending(path: "model.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func hubDownloaderRejectsUnboundedHeaderLength() throws {
+        try withValidModel { base, directory in
+            try Data(repeating: 0xff, count: 8).write(to: directory.appending(path: "model.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
+    @Test func hubDownloaderRejectsIndexPointingToWrongTensor() throws {
+        try withValidModel { base, directory in
+            let index = #"{"weight_map":{"missing_tensor":"model.safetensors"}}"#
+            try Data(index.utf8).write(to: directory.appending(path: "model.safetensors.index.json"))
             #expect(!HubModelDownloader().isDownloaded(model, at: base))
         }
     }
@@ -384,6 +421,10 @@ struct MLXModelStoreTests {
         #"{"version":"1.0","model":{"type":"BPE","vocab":{"a":0},"merges":[]}}"#
     }
 
+    private var validTokenizerConfig: String {
+        #"{"tokenizer_class":"Qwen2Tokenizer","eos_token":"a"}"#
+    }
+
     /// Four real U8 tensor bytes, with a little-endian length and an 8-byte-padded JSON header.
     private func tinyWeights(
         header: String = #"{"weight":{"dtype":"U8","shape":[4],"data_offsets":[0,4]}}"#
@@ -404,6 +445,7 @@ struct MLXModelStoreTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try Data("{}".utf8).write(to: directory.appending(path: "config.json"))
         try Data(validTokenizer.utf8).write(to: directory.appending(path: "tokenizer.json"))
+        try Data(validTokenizerConfig.utf8).write(to: directory.appending(path: "tokenizer_config.json"))
         try tinyWeights().write(to: directory.appending(path: "model.safetensors"))
         try body(base, directory)
     }

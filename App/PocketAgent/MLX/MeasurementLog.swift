@@ -3,7 +3,7 @@ import Observation
 import UIKit
 
 /// Device measurement notes for the MLX validation screens. Lines are fixed Japanese templates with numbers.
-/// Logging never throws into the UI: file errors are ignored and the in-memory log keeps working.
+/// Appending is best effort; clearing reports disk errors so callers never claim a failed deletion succeeded.
 @MainActor
 @Observable
 final class MeasurementLog {
@@ -19,13 +19,16 @@ final class MeasurementLog {
 
     @ObservationIgnored private let fileURL: URL
     @ObservationIgnored private let now: () -> Date
+    @ObservationIgnored private let removeItem: (URL) throws -> Void
 
     init(
         fileURL: URL = URL.applicationSupportDirectory.appending(path: "measurement-log.txt"),
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        removeItem: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
     ) {
         self.fileURL = fileURL
         self.now = now
+        self.removeItem = removeItem
         entries = Self.load(from: fileURL)
     }
 
@@ -35,10 +38,14 @@ final class MeasurementLog {
         save()
     }
 
-    /// Also removes the file, so nothing of the log stays on disk.
-    func clear() {
+    /// Clear memory only once the file is removed (or already absent), preserving entries for retry on failure.
+    func clear() throws {
+        do {
+            try removeItem(fileURL)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            // An absent file already satisfies the deletion request.
+        }
         entries = []
-        try? FileManager.default.removeItem(at: fileURL)
     }
 
     func render(

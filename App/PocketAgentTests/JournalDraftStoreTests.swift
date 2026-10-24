@@ -79,4 +79,40 @@ struct JournalDraftStoreTests {
         #expect(JournalDraftStore(fileURL: url).draft == nil)
         try drafts.clear()
     }
+
+    @Test func cleanupFailureAfterSaveCannotCreateDuplicate() async throws {
+        let url = location()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let drafts = JournalDraftStore(fileURL: url,
+            removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
+        let store = InMemoryJournalStore()
+        let session = JournalCaptureSession(source: .text, store: store, assistant: nil,
+            modelReady: false, drafts: drafts)
+        session.transcript = "一度だけ保存"
+        await session.save(useTranscriptOnly: true)
+        #expect(session.phase == .saved)
+        #expect(drafts.errorMessage != nil)
+        let draft = try #require(JournalDraftStore(fileURL: url).draft)
+        let restored = JournalCaptureSession(source: .text, store: store, assistant: nil,
+            modelReady: false, drafts: drafts, restoring: draft)
+        await restored.save(useTranscriptOnly: true)
+        #expect(try await store.all().count == 1)
+    }
+
+    @Test func discardStopsLateSummaryAndNeverRecreatesDraft() async throws {
+        let url = location()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let drafts = JournalDraftStore(fileURL: url)
+        let probe = StreamProbe()
+        let session = JournalCaptureSession(source: .text, store: InMemoryJournalStore(),
+            assistant: FakeJournalAssistant(summaryChunks: ["見出し: 途中\n要約"], probe: probe),
+            modelReady: true, drafts: drafts)
+        session.transcript = "原文"
+        session.summarize()
+        #expect(try await waitForJournal { session.summaryBody == "要約" })
+        try session.discardDraft()
+        probe.yield("遅い結果")
+        session.checkpointDraft()
+        #expect(JournalDraftStore(fileURL: url).draft == nil)
+    }
 }

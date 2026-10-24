@@ -18,6 +18,7 @@ struct PocketAgentApp: App {
     /// The one download flow: both the settings list and the detailed models screen drive it.
     @State private var downloadFlow: ModelDownloadFlow
     @State private var developer = DeveloperSettings()
+    @State private var drafts = JournalDraftStore()
     private let tokenStore = KeychainCredentialStore(
         service: "com.beesan82.pocketagent.github", account: "measurement-token")
 
@@ -66,6 +67,7 @@ struct PocketAgentApp: App {
                     developer: developer, tokenStore: tokenStore, journal: journal, meeting: meeting)
                     .modelContainer(container)
                     .environment(downloadFlow)
+                    .environment(drafts)
                     // The only presenter of the download / delete confirmations.
                     .modelDownloadDialogs(downloadFlow)
                     // Logged once here, not per screen (Settings and the models screen share the flow).

@@ -95,7 +95,14 @@ struct PersistenceTests {
         let credentials = SpyCredentialStore(key: "test-key")
         let githubToken = SpyCredentialStore(key: "test-token-123")
 
-        try await DataReset.eraseAll(context: context, journal: journal, credentials: credentials, githubToken: githubToken)
+        let base = FileManager.default.temporaryDirectory.appending(path: "reset-\(UUID())")
+        let log = MeasurementLog(fileURL: base.appending(path: "log"))
+        let drafts = JournalDraftStore(fileURL: base.appending(path: "draft"))
+        defer { try? FileManager.default.removeItem(at: base) }
+        log.append("音声テスト")
+        try drafts.save(JournalDraft(source: .text, transcript: "下書き"))
+        try await DataReset.eraseAll(context: context, journal: journal, credentials: credentials,
+            githubToken: githubToken, measurementLog: log, drafts: drafts)
 
         #expect(try context.fetchCount(FetchDescriptor<ConversationRecord>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<TurnRecord>()) == 0)
@@ -104,6 +111,31 @@ struct PersistenceTests {
         #expect(githubToken.deletes == 1)
         #expect(try githubToken.readAPIKey() == nil)
         #expect(try credentials.readAPIKey() == nil)
+        #expect(MeasurementLog(fileURL: base.appending(path: "log")).entries.isEmpty)
+        #expect(JournalDraftStore(fileURL: base.appending(path: "draft")).draft == nil)
+    }
+
+    @Test func failedLogDeletionStillAttemptsOtherDeletionsAndReportsFailure() async throws {
+        let base = FileManager.default.temporaryDirectory.appending(path: "reset-failure-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let log = MeasurementLog(fileURL: base.appending(path: "log"),
+            removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
+        let drafts = JournalDraftStore(fileURL: base.appending(path: "draft"))
+        log.append("削除失敗するログ")
+        try drafts.save(JournalDraft(source: .text, transcript: "削除する下書き"))
+        let credentials = SpyCredentialStore(key: "test-key")
+        let githubToken = SpyCredentialStore(key: "test-token")
+        let journal = SwiftDataJournalStore(modelContainer: container)
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "削除する日誌"))
+
+        await #expect(throws: (any Error).self) {
+            try await DataReset.eraseAll(context: container.mainContext, journal: journal,
+                credentials: credentials, githubToken: githubToken, measurementLog: log, drafts: drafts)
+        }
+        #expect(try await journal.all().isEmpty)
+        #expect(drafts.draft == nil)
+        #expect(credentials.deletes == 1 && githubToken.deletes == 1)
+        #expect(!log.entries.isEmpty)
     }
 
     @Test func noteUpdateReplacesText() async throws {

@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Home: the journal by day (newest first), search, and recording by voice or text.
 struct JournalView: View {
+    @Environment(JournalDraftStore.self) private var drafts
     let journal: any JournalStore
     let settings: ModelSettings
     let availability: any ModelAvailabilityChecking
@@ -15,6 +16,8 @@ struct JournalView: View {
     @State private var loaded = false
     @State private var query = ""
     @State private var input = ""
+    @State private var inputDraftID = UUID()
+    @State private var confirmDiscardDraft = false
     @State private var listError: String?
     /// Kept apart from `listError` so the reload after a failed delete does not hide it.
     @State private var deleteError: String?
@@ -29,6 +32,20 @@ struct JournalView: View {
 
     var body: some View {
         List {
+            if let draft = drafts.draft {
+                Section("保存前の下書き") {
+                    Text(String(draft.transcript.prefix(80))).lineLimit(3)
+                    Button("下書きを再開") { resumeDraft(draft) }.disabled(isRecordingBusy)
+                    Button("下書きを破棄", role: .destructive) { confirmDiscardDraft = true }
+                        .disabled(isRecordingBusy)
+                }
+            }
+            if let message = drafts.errorMessage {
+                Section {
+                    Text(message).foregroundStyle(.red)
+                    Button("下書きを破棄", role: .destructive) { confirmDiscardDraft = true }
+                }
+            }
             if let listError {
                 Text(listError).foregroundStyle(.red)
             }
@@ -75,7 +92,7 @@ struct JournalView: View {
         .safeAreaInset(edge: .bottom) { recorder }
         .task(id: TaskKey(query: query, token: reloadToken)) { await reload() }
         .task { await speech.refreshAvailability() }
-        .sheet(item: $capture) { request in
+        .sheet(item: $capture, onDismiss: { input = ""; inputDraftID = UUID() }) { request in
             JournalCaptureView(
                 request: request, journal: journal, settings: settings, availability: availability,
                 mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog
@@ -92,6 +109,43 @@ struct JournalView: View {
             Button("キャンセル", role: .cancel) {}
         }
         .onDisappear { stopRecordingOnLeave() }
+        .onChange(of: input) { _, value in
+            guard capture == nil, drafts.draft == nil || drafts.draft?.id == inputDraftID else { return }
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if drafts.draft?.id == inputDraftID {
+                    do { try drafts.clear() } catch { /* The error is shown above. */ }
+                }
+                return
+            }
+            do { try drafts.save(JournalDraft(id: inputDraftID, source: .text, transcript: value)) }
+            catch { /* The draft error is shown above. */ }
+        }
+        .confirmationDialog("下書きを破棄しますか？", isPresented: $confirmDiscardDraft, titleVisibility: .visible) {
+            Button("破棄", role: .destructive) {
+                do { try drafts.clear(); input = ""; inputDraftID = UUID() }
+                catch { /* The draft error is shown above. */ }
+            }
+            Button("キャンセル", role: .cancel) {}
+        }
+    }
+
+    private var hasOtherDraft: Bool {
+        (drafts.draft != nil && drafts.draft?.id != inputDraftID)
+            || (drafts.draft == nil && drafts.errorMessage != nil)
+    }
+
+    private func resumeDraft(_ draft: JournalDraft) {
+        Task {
+            do {
+                if try await journal.entry(id: draft.id) != nil {
+                    try drafts.clear()
+                    reloadToken += 1
+                    return
+                }
+                capture = CaptureRequest(source: draft.source, transcript: draft.transcript,
+                    draft: draft, resumesDraft: true)
+            } catch { listError = "下書きを開けませんでした。もう一度お試しください。" }
+        }
     }
 
     // MARK: List
@@ -197,10 +251,10 @@ struct JournalView: View {
                     .lineLimit(1...4)
                     .focused($inputFocused)
                     .textFieldStyle(.roundedBorder)
-                    .disabled(isRecordingBusy)
+                    .disabled(isRecordingBusy || hasOtherDraft)
                 Button("記録") { recordText() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isRecordingBusy || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isRecordingBusy || hasOtherDraft || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding()
@@ -223,7 +277,7 @@ struct JournalView: View {
             Button { startRecording() } label: {
                 Image(systemName: "mic.circle.fill").font(.title)
             }
-            .disabled(speech.reason != nil)
+            .disabled(speech.reason != nil || drafts.draft != nil || drafts.errorMessage != nil)
             .accessibilityLabel("録音")
             .accessibilityHint(speech.reason?.userMessage ?? "")
         }
@@ -233,7 +287,7 @@ struct JournalView: View {
         inputFocused = false
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        capture = CaptureRequest(source: .text, transcript: text)
+        capture = CaptureRequest(source: .text, transcript: text, draft: drafts.draft)
     }
 
     private func startRecording() {
