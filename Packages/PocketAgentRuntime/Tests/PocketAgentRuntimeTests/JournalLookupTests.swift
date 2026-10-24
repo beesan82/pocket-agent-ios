@@ -139,7 +139,8 @@ struct JournalLookupTests {
         let store = try await store([
             (date(2026, 10, 1, 10), journal("なし", title: "定例", transcript: transcript))
         ])
-        let found = try await find("claudeに何を頼んだ？", store)
+        // Only "claude" is a term: the excerpt must come from a case-insensitive match.
+        let found = try await find("claudeのことは？", store)
         #expect(found.first?.text.contains("Claudeに要約を頼んだ") == true)
     }
 
@@ -155,7 +156,8 @@ struct JournalLookupTests {
 
     // The section's header, date line and each line's "- [date] " prefix count toward the budget.
     @Test func budgetCountsSectionOverhead() async throws {
-        let long = String(repeating: "会議の記録。", count: 100)
+        // 240-character entries: three fit 800 by text alone, but not with the section's overhead.
+        let long = String(repeating: "会議の記録。", count: 40)
         let store = try await store((1...10).map { (date(2026, 10, $0, 10), journal(long)) })
         let found = try await find("会議", store, budget: .appleLocal)
         let section = try #require(ConversationContext.journalLookupSection(found, now: now))
