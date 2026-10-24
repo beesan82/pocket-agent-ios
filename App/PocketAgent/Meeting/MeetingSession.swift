@@ -146,6 +146,8 @@ final class MeetingSession {
             if case .paused = state {
                 Task { await resume() }
             }
+        case .candidate:
+            break  // the meeting runs a single-language capture (bilingual meetings: stage B)
         }
     }
 

@@ -100,14 +100,14 @@ struct MeetingView: View {
                 Text(reason.userMessage).font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 switch reason {
-                case .assetsNotInstalled:
+                case .assetsNotInstalled, .englishAssetsNotInstalled:
                     Button("音声データを入手") { confirmInstall = true }.font(.footnote)
                 case .permissionDenied:
                     Button("マイクと音声認識を許可") {
                         Task { await meeting.source.requestPermissions() }
                     }
                     .font(.footnote)
-                case .moduleUnavailable, .japaneseUnsupported:
+                case .moduleUnavailable, .japaneseUnsupported, .englishUnsupported:
                     EmptyView()
                 }
             }

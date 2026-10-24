@@ -31,3 +31,5 @@ __pycache__/
 
 # The Runtime package resolves only AgentRunKit (exact-pinned); the app graph lives in App/Package.resolved.
 Packages/PocketAgentRuntime/Package.resolved
+# superpowers scratch (brainstorm mockups, plan ledgers)
+.superpowers/

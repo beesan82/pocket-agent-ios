@@ -176,6 +176,13 @@
 - 影響要件: FR-11, 9.2
 - 状態: 採用（実機未検証）
 
+## ADR-035 二言語の言語判定は「日英 2 系統の同時認識 + 発言ごとの信頼度比較」で、まず実機ゲートで測る
+- 決定: SpeechAnalyzer に話し言葉の言語判定が無いため、同じマイク音声を日本語・英語の 2 つの `SpeechAnalyzer` に流し（`SpeechCapture(locales:)`）、確定結果を `transcriptionConfidence` の文字数加重平均付きの候補として Core の `LanguageArbiter` で判定する。候補は 1.5 秒保留し、時間範囲が重なる他系統の候補と 1 組にして信頼度の高い系統を採る（信頼度なしの系統は 0.5 扱い、同点は日本語側の文字種で決める）。判定済みと重なる遅着は捨て、出した発言は差し替えない。両系統 0.3 未満は雑音として出さない。翻訳は Apple Translation（端末内、導入済みペアは `TranslationSession(installedSource:target:)`、導入は `.translationTask` の同意シート）。会議画面への組み込み（段階 B）は、検証画面のゲート結果（`docs/bilingual-eval.md`）で閾値を確定してから。単一ロケールの `SpeechCapture` の動作は変えない。
+- 根拠: 話者のタップ切替はユーザーが不可とした。2 系統の負荷と信頼度の分かれ方は実機でしか分からない。
+- 検証: `LanguageArbiterTests`、`BilingualRunStatsTests`、`SpeechAvailabilityTests.reasonOrderWithEnglish`。実機は未検証。
+- 影響要件: FR-11, 6.3
+- 状態: 採用（段階 A。実機未検証）
+
 ## 未決定
 - 永続化: SwiftData を Phase 1 で採用（設計書）。
 - Bundle ID: `com.beesan82.pocketagent`（2026-10-18 決定、ユーザー承認）。Team ID はリポジトリに書かず、Codemagic の自動署名がプロファイルから設定する。

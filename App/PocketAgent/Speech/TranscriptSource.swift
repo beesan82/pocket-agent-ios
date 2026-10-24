@@ -10,6 +10,9 @@ enum TranscriptEvent: Sendable, Equatable {
     case failed(String)
     /// The audio interruption that ended this capture is over and the system allows recording again.
     case interruptionEnded
+    /// Bilingual capture only: one recognizer's final result with its confidence; the consumer
+    /// decides the language (`LanguageArbiter`). A bilingual capture sends these instead of `.final`.
+    case candidate(LaneCandidate)
 }
 
 /// A live on-device transcription the meeting session can start, stop and listen to.
