@@ -409,6 +409,23 @@ struct MLXModelStoreTests {
         }
     }
 
+    @Test func numberedShardsNeedCompleteSetAndIndex() throws {
+        try withValidModel { base, directory in
+            try FileManager.default.removeItem(at: directory.appending(path: "model.safetensors"))
+            try tinyWeights().write(to: directory.appending(path: "model-00001-of-00002.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            let index = #"{"weight_map":{"weight":"model-00001-of-00002.safetensors"}}"#
+            try Data(index.utf8).write(to: directory.appending(path: "model.safetensors.index.json"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            try tinyWeights(header: #"{"other":{"dtype":"U8","shape":[4],"data_offsets":[0,4]}}"#)
+                .write(to: directory.appending(path: "model-00002-of-00002.safetensors"))
+            #expect(!HubModelDownloader().isDownloaded(model, at: base))
+            let complete = #"{"weight_map":{"weight":"model-00001-of-00002.safetensors","other":"model-00002-of-00002.safetensors"}}"#
+            try Data(complete.utf8).write(to: directory.appending(path: "model.safetensors.index.json"))
+            #expect(HubModelDownloader().isDownloaded(model, at: base))
+        }
+    }
+
     @Test(arguments: ["{", "{}", #"{"weight_map":{}}"#, #"{"weight_map":{"weight":"../outside.safetensors"}}"#])
     func hubDownloaderRejectsInvalidWeightIndex(json: String) throws {
         try withValidModel { base, directory in

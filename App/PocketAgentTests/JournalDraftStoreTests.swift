@@ -115,4 +115,46 @@ struct JournalDraftStoreTests {
         session.checkpointDraft()
         #expect(JournalDraftStore(fileURL: url).draft == nil)
     }
+
+    @Test func clearingDraftAlsoClearsComposerBeforeItCanBeReopened() throws {
+        let url = location()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let drafts = JournalDraftStore(fileURL: url)
+        drafts.editComposer("削除する入力")
+        #expect(drafts.composerText == "削除する入力")
+        try drafts.clear()
+        #expect(drafts.composerText.isEmpty)
+        #expect(drafts.draft == nil)
+        drafts.editComposer("新しい入力")
+        #expect(drafts.draft?.transcript == "新しい入力")
+    }
+
+    @Test(arguments: [false, true])
+    func resumeCannotReopenDiscardedOrChangedSnapshot(discard: Bool) async throws {
+        let url = location()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let drafts = JournalDraftStore(fileURL: url)
+        let original = JournalDraft(source: .text, transcript: "古い入力")
+        try drafts.save(original)
+        let started = TestGate()
+        let release = TestGate()
+        let resume = Task {
+            try await drafts.resumeDraft { _ in
+                started.open()
+                await release.wait()
+                return nil
+            }
+        }
+        await started.wait()
+        if discard {
+            try drafts.clear()
+        } else {
+            var edited = original
+            edited.transcript = "新しい入力"
+            try drafts.save(edited)
+        }
+        release.open()
+        #expect(try await resume.value == nil)
+        #expect(drafts.draft?.transcript == (discard ? nil : "新しい入力"))
+    }
 }
