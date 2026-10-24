@@ -57,6 +57,32 @@ struct LanguageArbiterTests {
         #expect(Set(decisions.first?.rejected.map(\.id) ?? []) == Set([ja1.id, ja2.id]))
     }
 
+    @Test func candidateSpanningTwoGroupsMergesThem() {
+        var arbiter = LanguageArbiter()
+        let ja1 = candidate("ja", "ざっと", confidence: 0.35, start: 0, end: 1.5, arrivedAt: 3.0)
+        let ja2 = candidate("ja", "リストが", confidence: 0.4, start: 1.6, end: 4, arrivedAt: 4.1)
+        let en = candidate("en", "That should be fine but we need the list", confidence: 0.9, start: 0, end: 4, arrivedAt: 4.2)
+
+        _ = arbiter.submit(ja1)
+        _ = arbiter.submit(ja2)
+        _ = arbiter.submit(en)
+        let decisions = arbiter.drain()
+
+        #expect(decisions.count == 1)
+        #expect(decisions.first?.language == "en")
+        #expect(decisions.first?.accepted == [en])
+        #expect(Set(decisions.first?.rejected.map(\.id) ?? []) == Set([ja1.id, ja2.id]))
+    }
+
+    @Test func decisionRecordsWhenItWasDecided() {
+        var arbiter = LanguageArbiter()
+        _ = arbiter.submit(candidate("ja", "はい了解です", confidence: 0.8, start: 1, end: 2, arrivedAt: 2.5))
+        #expect(arbiter.flush(now: 4.2).first?.decidedAt == 4.2)
+
+        _ = arbiter.submit(candidate("ja", "次へ", confidence: 0.8, start: 6, end: 7, arrivedAt: 7.4))
+        #expect(arbiter.drain(now: 7.9).first?.decidedAt == 7.9)
+    }
+
     @Test func singleIsHeldThenAccepted() {
         var arbiter = LanguageArbiter()
         let ja = candidate("ja", "わかりました", confidence: 0.8, start: 5, end: 6, arrivedAt: 6.1)

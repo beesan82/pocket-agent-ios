@@ -12,7 +12,7 @@ public struct BilingualRunStats: Equatable {
     /// Mean confidence of every Japanese / English recognizer result, accepted or not.
     public let jaConfidence: Double?
     public let enConfidence: Double?
-    /// Mean seconds from the end of an accepted utterance to its arrival.
+    /// Mean seconds from the end of an accepted utterance to when it could be shown (the hold included).
     public let averageDelay: Double?
     public let minAvailableMB: Int?
 
@@ -25,7 +25,9 @@ public struct BilingualRunStats: Equatable {
         let everything = decisions.flatMap { $0.accepted + $0.rejected }
         jaConfidence = Self.mean(everything.filter { $0.language == "ja" }.compactMap(\.confidence))
         enConfidence = Self.mean(everything.filter { $0.language == "en" }.compactMap(\.confidence))
-        averageDelay = Self.mean(shown.flatMap(\.accepted).map { $0.arrivedAt - $0.end })
+        averageDelay = Self.mean(shown.flatMap { decision in
+            decision.accepted.map { max(decision.decidedAt, $0.arrivedAt) - $0.end }
+        })
     }
 
     public var lines: [String] {

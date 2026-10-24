@@ -41,6 +41,16 @@ struct BilingualRunStatsTests {
         #expect(stats.lines.allSatisfy { $0.count <= 40 })
     }
 
+    @Test func delayIncludesTheHold() throws {
+        let ja = LaneCandidate(language: "ja", text: "x", confidence: 0.9, start: 1, end: 2, arrivedAt: 3)
+        let decision = ArbiterDecision(language: "ja", accepted: [ja], rejected: [], reason: .single, decidedAt: 4.5)
+
+        let stats = BilingualRunStats(expected: "ja", decisions: [decision], minAvailableMB: nil)
+
+        let delay: Double = try #require(stats.averageDelay)
+        #expect(abs(delay - 2.5) < 0.0001)
+    }
+
     @Test func emptyRunShowsPlaceholders() {
         let stats = BilingualRunStats(expected: "en", decisions: [], minAvailableMB: nil)
 
