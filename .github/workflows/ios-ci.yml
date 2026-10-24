@@ -63,10 +63,10 @@ jobs:
           brew install xcodegen
           xcodegen --version
           xcodegen generate
-          # XcodeGen does not manage Package.resolved: seed the app with the committed pins
-          # (same remote graph as PocketAgentRuntime) so transitive versions stay fixed.
+          # XcodeGen does not manage Package.resolved: seed the app with its committed pins
+          # (App/Package.resolved, the whole app graph) so transitive versions stay fixed.
           mkdir -p PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
-          cp Packages/PocketAgentRuntime/Package.resolved \
+          cp App/Package.resolved \
             PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
       - name: Resolve packages
@@ -80,7 +80,7 @@ jobs:
           import json
           def pins(path):
               return {p["identity"]: p["state"].get("revision") for p in json.load(open(path))["pins"]}
-          committed = pins("Packages/PocketAgentRuntime/Package.resolved")
+          committed = pins("App/Package.resolved")
           app = pins("PocketAgent.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
           drift = {k: (committed.get(k), app.get(k)) for k in committed.keys() | app.keys() if committed.get(k) != app.get(k)}
           if drift:
