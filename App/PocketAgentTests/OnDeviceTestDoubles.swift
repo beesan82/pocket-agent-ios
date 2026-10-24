@@ -46,12 +46,16 @@ struct TurnCall: Equatable {
     let prompt: String
 }
 
-/// Runs one script per turn. `.callTool` calls the passed (gated, recorded) tool the way the model
-/// would natively, then streams the tool's result as reply text; `.text` streams text.
+/// Runs one script per turn and yields the reply so far (cumulative, like Foundation Models
+/// snapshots). `.callTool` calls the passed (gated, recorded) tool the way the model would natively,
+/// then appends the tool's result to the reply; `.text` appends text; `.rewrite` replaces the whole
+/// reply (a snapshot that does not extend the previous one). With `toolsIgnoreCancellation`, tool
+/// calls run in a detached task, as if the framework ran them outside the cancelled turn.
 final class ScriptedTurnRunner: OnDeviceTurnRunner, @unchecked Sendable {
     enum Step: Sendable {
         case callTool(String, String)
         case text(String)
+        case rewrite(String)
     }
 
     enum FakeError: Error { case scriptExhausted }
@@ -60,7 +64,12 @@ final class ScriptedTurnRunner: OnDeviceTurnRunner, @unchecked Sendable {
     private let scripts: [[Step]]
     private var recorded: [TurnCall] = []
 
-    init(_ scripts: [[Step]]) { self.scripts = scripts }
+    private let toolsIgnoreCancellation: Bool
+
+    init(_ scripts: [[Step]], toolsIgnoreCancellation: Bool = false) {
+        self.scripts = scripts
+        self.toolsIgnoreCancellation = toolsIgnoreCancellation
+    }
 
     var calls: [TurnCall] { lock.withLock { recorded } }
 
@@ -70,6 +79,7 @@ final class ScriptedTurnRunner: OnDeviceTurnRunner, @unchecked Sendable {
             return recorded.count - 1
         }
         let script = index < scripts.count ? scripts[index] : nil
+        let detached = toolsIgnoreCancellation
         return AsyncThrowingStream { continuation in
             let pump = Task {
                 guard let script else {
@@ -77,13 +87,18 @@ final class ScriptedTurnRunner: OnDeviceTurnRunner, @unchecked Sendable {
                     return
                 }
                 do {
+                    var reply = ""
                     for step in script {
                         switch step {
                         case let .callTool(name, arguments):
-                            continuation.yield(try await NoteToolBridge.invoke(name, argumentsJSON: arguments, tools: tools))
+                            let call = { try await NoteToolBridge.invoke(name, argumentsJSON: arguments, tools: tools) }
+                            reply += detached ? try await Task.detached(operation: call).value : try await call()
                         case let .text(text):
-                            continuation.yield(text)
+                            reply += text
+                        case let .rewrite(text):
+                            reply = text
                         }
+                        continuation.yield(reply)
                     }
                     continuation.finish()
                 } catch {
@@ -95,12 +110,13 @@ final class ScriptedTurnRunner: OnDeviceTurnRunner, @unchecked Sendable {
     }
 }
 
-/// A turn the test drives chunk by chunk (like a streaming model).
+/// A turn the test drives chunk by chunk (like a streaming model); yields the reply so far.
 final class GatedTurnRunner: OnDeviceTurnRunner, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: AsyncThrowingStream<String, Error>.Continuation?
     private var recorded: [TurnCall] = []
     private var terminated = false
+    private var sofar = ""
 
     var calls: [TurnCall] { lock.withLock { recorded } }
     /// The current turn's stream ended (finished, failed or its consumer went away).
@@ -115,13 +131,18 @@ final class GatedTurnRunner: OnDeviceTurnRunner, @unchecked Sendable {
         lock.withLock {
             recorded.append(TurnCall(instructions: instructions, prompt: prompt))
             terminated = false
+            sofar = ""
             self.continuation = continuation
         }
         return stream
     }
 
     func yield(_ text: String) {
-        _ = lock.withLock { continuation }?.yield(text)
+        let (continuation, reply) = lock.withLock { () -> (AsyncThrowingStream<String, Error>.Continuation?, String) in
+            sofar += text
+            return (self.continuation, sofar)
+        }
+        _ = continuation?.yield(reply)
     }
 
     func finish() {

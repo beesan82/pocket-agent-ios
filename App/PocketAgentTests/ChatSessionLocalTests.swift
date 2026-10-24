@@ -200,6 +200,39 @@ struct ChatSessionLocalTests {
         #expect(try await notes.all().isEmpty)
     }
 
+    // Even if the framework runs the tool call outside the cancelled turn, stop() closes the sheet
+    // and no note is saved, and a later tap on the closed sheet cannot save one either.
+    @Test func stopDeniesApprovalEvenWhenToolIgnoresCancellation() async throws {
+        let runner = ScriptedTurnRunner(
+            [[.callTool(NoteToolName.save, Self.json(["text": "牛乳"])), .text("保存しました")]],
+            toolsIgnoreCancellation: true)
+        let conversation = try repository.create(choice: .mlxLocal)
+        let session = makeSession(conversation, onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("牛乳を覚えといて")
+        #expect(try await waitUntil { broker.pending != nil })
+        session.stop()
+
+        #expect(try await waitUntil { broker.pending == nil })
+        broker.answer(.approveOnce)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try await notes.all().isEmpty)
+        #expect(try await waitUntil { session.status == .failed(RunFailureText.stopped) })
+        #expect(repository.turns(of: conversation) == [ChatTurn(role: .user, text: "牛乳を覚えといて")])
+    }
+
+    // Snapshots are cumulative but a model may rewrite its reply (e.g. after a tool call):
+    // the saved reply is the last snapshot, never old + new.
+    @Test func rewrittenReplyIsNotDuplicated() async throws {
+        let runner = ScriptedTurnRunner([[.text("保存します。"), .rewrite("メモを保存しました。")]])
+        let session = makeSession(try repository.create(choice: .mlxLocal), onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("牛乳を覚えて")
+
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        #expect(session.turns.last?.text == "メモを保存しました。")
+    }
+
     @Test(arguments: [ModelChoice.appleLocal, .mlxLocal])
     func rescuedJSONAsksAndSaves(_ choice: ModelChoice) async throws {
         settings.choice = choice
