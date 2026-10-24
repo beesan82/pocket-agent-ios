@@ -362,7 +362,10 @@ struct MeetingView: View {
 
     private func cell(for segment: TranscriptSegment, column: String) -> some View {
         let isOriginal = segment.language == column
-        let text = isOriginal ? segment.text : (segment.translation ?? "…")
+        // "…" only while a translation is still coming; otherwise the cell stays empty.
+        let text = isOriginal
+            ? segment.text
+            : (segment.translation ?? (meeting.isAwaitingTranslation(segment) ? "…" : ""))
         return Text(text)
             .fontWeight(isOriginal ? .semibold : .regular)
             .foregroundStyle(isOriginal || segment.translation != nil ? .primary : .secondary)

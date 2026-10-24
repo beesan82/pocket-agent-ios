@@ -11,9 +11,12 @@ final class FakeTranslator: Translating, @unchecked Sendable {
     private var failuresLeft = 0
     private var hangs = false
 
-    init(failures: Int = 0, hangs: Bool = false) {
+    private let delay: Duration?
+
+    init(failures: Int = 0, hangs: Bool = false, delay: Duration? = nil) {
         self.failuresLeft = failures
         self.hangs = hangs
+        self.delay = delay
     }
 
     var calls: [String] { lock.withLock { recorded } }
@@ -31,6 +34,7 @@ final class FakeTranslator: Translating, @unchecked Sendable {
         }
         if fail { throw FakeError.scripted }
         if hang { try await Task.sleep(for: .seconds(60)) }
+        if let delay { try await Task.sleep(for: delay) }
         return "\(target):\(text)"
     }
 }
@@ -213,6 +217,55 @@ struct BilingualMeetingTests {
 
         #expect(setup.session.segments.map(\.text) == ["一つ目", "Second"])
         #expect(setup.session.segments.last?.offset == 11)
+    }
+
+    @Test func notesWaitForAPendingEnglishTranslation() async throws {
+        let assistant = FakeJournalAssistant(notesChunks: ["## 決まったこと\n- A\n## 宿題\n- B\n## 論点・未決\n- C"])
+        let setup = make(translator: FakeTranslator(hangs: true), assistant: assistant)
+        await setup.session.start()
+        setup.bilingual.yield(candidate("en", "Thanks", confidence: 0.9, start: 1, end: 2, arrivedAt: 2.1))
+        await settle()
+        setup.bilingual.elapsed = 4
+        setup.session.tick()
+        await settle()
+        #expect(setup.session.isAwaitingTranslation(setup.session.segments[0]))
+
+        setup.session.updateNotesNow()
+        await settle()
+
+        #expect(assistant.notesCalls.calls.isEmpty)
+    }
+
+    @Test func finishTranslatesBeforeTheLastNotesUpdate() async throws {
+        let assistant = FakeJournalAssistant(notesChunks: ["## 決まったこと\n- A\n## 宿題\n- B\n## 論点・未決\n- C"])
+        let setup = make(translator: FakeTranslator(delay: .milliseconds(200)), assistant: assistant)
+        await setup.session.start()
+        setup.bilingual.yield(candidate("en", "Thanks", confidence: 0.9, start: 1, end: 2, arrivedAt: 2.1))
+        await settle()
+
+        await setup.session.finish()
+
+        #expect(assistant.notesCalls.calls.map(\.newText) == ["ja:Thanks"])
+        #expect(setup.session.state == .saved)
+    }
+
+    @Test func nothingIsTranslatedAfterTheMeetingEnds() async throws {
+        let setup = make(translator: FakeTranslator(hangs: true))
+        setup.session.translationWait = .milliseconds(100)
+        await setup.session.start()
+        setup.bilingual.yield(candidate("en", "Thanks", confidence: 0.9, start: 1, end: 2, arrivedAt: 2.1))
+        await settle()
+        await setup.session.finish()
+        #expect(setup.session.state == .saved)
+
+        let later = FakeTranslator()
+        setup.session.translator = later
+        setup.session.setForeground(false)
+        setup.session.setForeground(true)
+        await settle()
+
+        #expect(later.calls.isEmpty)
+        #expect(setup.session.translationTask == nil)
     }
 
     @Test func languageChoiceIsFixedWhileAMeetingIsOpen() async throws {
