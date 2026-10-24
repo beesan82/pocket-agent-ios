@@ -83,9 +83,12 @@ enum DataReset {
     @MainActor
     static func eraseAll(
         context: ModelContext, journal: any JournalStore, credentials: any CredentialStore,
-        githubToken: any CredentialStore
+        githubToken: any CredentialStore,
+        measurementLog: MeasurementLog, drafts: JournalDraftStore
     ) async throws {
         var firstError: Error?
+        do { try measurementLog.clear() } catch { firstError = firstError ?? error }
+        do { try drafts.clear() } catch { firstError = firstError ?? error }
         do { try ConversationRepository(context: context).deleteAll() } catch { firstError = firstError ?? error }
         do { try await journal.deleteAll() } catch { firstError = firstError ?? error }
         do {

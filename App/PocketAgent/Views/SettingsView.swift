@@ -25,6 +25,8 @@ struct SettingsView: View {
     @State private var tokenStatus: String?
     @State private var appleReason: ModelUnavailableReason?
     @Environment(ModelDownloadFlow.self) private var downloadFlow
+    @Environment(JournalDraftStore.self) private var drafts
+    @State private var erasing = false
 
     var body: some View {
         Form {
@@ -105,8 +107,9 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("設定")
+        .disabled(erasing)
         .confirmationDialog(
-            "会話・日誌・測定ログ・APIキー・GitHub トークンをすべて削除します", isPresented: $confirmErase, titleVisibility: .visible
+            "会話・日誌・下書き・測定ログ・APIキー・GitHub トークンをすべて削除します", isPresented: $confirmErase, titleVisibility: .visible
         ) {
             Button("全データ削除", role: .destructive) { Task { await eraseAll() } }
             Button("キャンセル", role: .cancel) {}
@@ -187,18 +190,23 @@ struct SettingsView: View {
     }
 
     private func eraseAll() async {
-        measurementLog.clear()
+        guard !erasing else { return }
+        erasing = true
+        defer { erasing = false }
         do {
             try await DataReset.eraseAll(
                 context: modelContext,
                 journal: journal,
-                credentials: credentials, githubToken: tokenStore)
+                credentials: credentials, githubToken: tokenStore,
+                measurementLog: measurementLog, drafts: drafts)
             developer.isEnabled = false
             tokenInput = ""
             eraseStatus = "すべてのデータを削除しました"
         } catch {
             eraseStatus = "削除を完了できませんでした。もう一度お試しください"
         }
+        keyInput = ""
+        tokenInput = ""
         refresh()
     }
 

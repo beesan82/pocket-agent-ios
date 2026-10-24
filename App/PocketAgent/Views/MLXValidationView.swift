@@ -62,6 +62,7 @@ struct MLXValidationView: View {
     @State private var speechChars: Int?
     @State private var copied = false
     @State private var confirmClear = false
+    @State private var clearFailed = false
     @State private var confirmUpload = false
     @State private var uploading = false
     @State private var hasToken = false
@@ -155,6 +156,10 @@ struct MLXValidationView: View {
             if copied {
                 Text("コピーしました").font(.footnote).foregroundStyle(.secondary)
             }
+            if clearFailed {
+                Text("ログを削除できませんでした。もう一度お試しください。")
+                    .font(.footnote).foregroundStyle(.red)
+            }
             if developer.isEnabled {
                 Button("GitHub に送信") { confirmUpload = true }
                     .buttonStyle(.bordered)
@@ -189,8 +194,13 @@ struct MLXValidationView: View {
         }
         .confirmationDialog("ログを消去しますか？", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("クリア", role: .destructive) {
-                measurementLog.clear()
-                copied = false
+                do {
+                    try measurementLog.clear()
+                    copied = false
+                    clearFailed = false
+                } catch {
+                    clearFailed = true
+                }
             }
             Button("キャンセル", role: .cancel) {}
         }
