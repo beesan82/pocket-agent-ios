@@ -60,29 +60,9 @@ public enum RelativeDateRange {
     }
 }
 
-/// Search terms for a journal question: split from the question for the chat's lookup
-/// (`keywords`), or parsed from LLM output / split on punctuation (`parse` / `fallback`).
+/// Search terms for a journal question, split from the question for the chat's lookup.
 public enum SearchTerms {
     public static let maxTerms = 8
-
-    /// Accepts a JSON array of strings, possibly wrapped in other text. Anything else is nil.
-    public static func parse(llmOutput: String) -> [String]? {
-        guard let open = llmOutput.firstIndex(of: "["),
-              let close = llmOutput.lastIndex(of: "]"),
-              open < close,
-              let data = String(llmOutput[open...close]).data(using: .utf8),
-              let raw = try? JSONDecoder().decode([String].self, from: data)
-        else { return nil }
-        return clean(raw.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, limit: maxTerms)
-    }
-
-    /// Used when the model gave no usable terms: split the question into fragments of 2+ characters.
-    public static func fallback(question: String) -> [String] {
-        var separators = CharacterSet.whitespacesAndNewlines
-        separators.insert(charactersIn: "、。？！?!")
-        let fragments = question.components(separatedBy: separators).filter { $0.count >= 2 }
-        return clean(fragments, limit: nil)
-    }
 
     /// Question words that are not worth searching for.
     static let questionWords: Set<String> = ["何", "誰", "何時", "何処"]
@@ -141,42 +121,6 @@ public enum SearchTerms {
     }
 }
 
-/// Chooses which entries to show the model.
-public enum JournalRetrieval {
-    public static func select(
-        inRange: [JournalEntry]?, hitsByTerm: [[JournalEntry]], recent: [JournalEntry]
-    ) -> (entries: [JournalEntry], usedRecentFallback: Bool) {
-        let hits = unique(hitsByTerm.flatMap { $0 })
-        let chosen: [JournalEntry]
-        if let inRange {
-            let hitIDs = Set(hits.map(\.id))
-            let narrowed = inRange.filter { hitIDs.contains($0.id) }
-            chosen = narrowed.isEmpty ? inRange : narrowed
-        } else {
-            chosen = hits
-        }
-        let entries = newestFirst(unique(chosen))
-        if entries.isEmpty {
-            return (recent, true)
-        }
-        return (entries, false)
-    }
-
-    /// Dedupes by id, keeping the first occurrence.
-    private static func unique(_ entries: [JournalEntry]) -> [JournalEntry] {
-        var seen = Set<UUID>()
-        return entries.filter { seen.insert($0.id).inserted }
-    }
-
-    static func newestFirst(_ entries: [JournalEntry]) -> [JournalEntry] {
-        // Offsets make the order of equal timestamps deterministic (input order).
-        entries.enumerated()
-            .sorted { $0.element.createdAt != $1.element.createdAt
-                ? $0.element.createdAt > $1.element.createdAt : $0.offset < $1.offset }
-            .map(\.element)
-    }
-}
-
 public struct PackedEntry: Equatable, Sendable {
     public let entry: JournalEntry
     public let text: String
@@ -184,30 +128,6 @@ public struct PackedEntry: Equatable, Sendable {
     public init(entry: JournalEntry, text: String) {
         self.entry = entry
         self.text = text
-    }
-}
-
-/// Packs entries into a bounded prompt context, newest first.
-public enum JournalContextPacker {
-    public static func pack(
-        _ entries: [JournalEntry], maxEntries: Int = 20, maxCharactersPerEntry: Int = 300,
-        maxTotalCharacters: Int = 3000
-    ) -> [PackedEntry] {
-        var packed: [PackedEntry] = []
-        var total = 0
-        for entry in JournalRetrieval.newestFirst(entries).prefix(max(0, maxEntries)) {
-            let text = truncate((entry.title.map { $0 + "\n" } ?? "") + entry.body, to: maxCharactersPerEntry)
-            if total + text.count > maxTotalCharacters { break }
-            total += text.count
-            packed.append(PackedEntry(entry: entry, text: text))
-        }
-        return packed
-    }
-
-    /// The trailing "…" counts toward the limit.
-    private static func truncate(_ text: String, to limit: Int) -> String {
-        guard limit >= 1, text.count > limit else { return limit >= 1 ? text : "" }
-        return String(text.prefix(limit - 1)) + "…"
     }
 }
 
