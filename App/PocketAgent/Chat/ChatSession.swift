@@ -47,6 +47,9 @@ final class ChatSession {
     @ObservationIgnored private let settings: ModelSettings
     @ObservationIgnored private let resolve: ClientResolver
     @ObservationIgnored private let onDevice: any OnDeviceModelAccess
+    @ObservationIgnored private let broker: ApprovalBroker
+    /// The running on-device turn's stop signal (nil when none runs).
+    @ObservationIgnored private var onDeviceStop: TurnStop?
     @ObservationIgnored private let approvalHandler: ToolApprovalGate.ApprovalHandler
     @ObservationIgnored private let log: @MainActor (String) -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -73,6 +76,7 @@ final class ChatSession {
         self.settings = settings
         self.resolve = resolve
         self.onDevice = onDevice
+        self.broker = broker
         self.log = log
         turns = repository.turns(of: conversation)
         // "Allow for this conversation" lives in this handler's ConversationApprovals: shared by
@@ -129,6 +133,13 @@ final class ChatSession {
 
     func stop() {
         task?.cancel()
+        // Foundation Models may run a tool call outside the cancelled task: refuse further tool
+        // calls and close an open approval sheet as denied, so a stopped turn never saves anything.
+        if let onDeviceStop {
+            onDeviceStop.stop()
+            broker.answer(.deny(reason: nil))
+            self.onDeviceStop = nil
+        }
         // Loading cannot be cancelled: release the session now and let the
         // late load completion be ignored.
         if status == .loadingModel {
@@ -197,13 +208,18 @@ final class ChatSession {
         // and the same reply is never rescued and asked about again.
         let tools = NoteTools.make(store: notes, limit: .appleLocal)
         let recorder = ToolCallRecorder()
+        let turnStop = TurnStop()
+        onDeviceStop = turnStop
         let sessionTools: [any AnyTool<EmptyContext>] = ToolApprovalGate.wrap(tools, approval: approvalHandler)
-            .map { gated -> any AnyTool<EmptyContext> in RecordingTool(inner: gated, recorder: recorder) }
+            .map { gated -> any AnyTool<EmptyContext> in
+                RecordingTool(inner: StoppableTool(inner: gated, turnStop: turnStop), recorder: recorder)
+            }
         task = Task {
             defer {
                 if sendID == localSendID {
                     streamingText = ""
                     task = nil
+                    onDeviceStop = nil
                 }
             }
             // Memory is optional context: a read failure must not stop the answer.
@@ -230,8 +246,9 @@ final class ChatSession {
                     instructions: ConversationContext.onDeviceInstructions(memorySection: section),
                     prompt: LocalAgentPrompt.fold(previous: previousTurns, current: message),
                     tools: sessionTools)
-                for try await chunk in stream {
-                    reply += chunk
+                // Each element is the reply so far; a later one may rewrite an earlier one.
+                for try await sofar in stream {
+                    reply = sofar
                     streamingText = reply
                 }
             } catch {

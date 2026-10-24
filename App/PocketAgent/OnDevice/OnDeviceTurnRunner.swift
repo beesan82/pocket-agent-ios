@@ -4,8 +4,9 @@ import FoundationModels
 
 /// One on-device chat turn. Injected so `ChatSession` tests run without a model.
 protocol OnDeviceTurnRunner: Sendable {
-    /// Reply text as it grows (new suffixes). `tools` are the gated, recorded note tools; the
-    /// model calls them natively. Ending the consumer cancels the turn.
+    /// The reply so far, as it grows (each element replaces the previous one: the model may rewrite
+    /// its text, e.g. after a tool call). `tools` are the gated, recorded note tools; the model calls
+    /// them natively. Ending the consumer cancels the turn.
     func run(instructions: String, prompt: String, tools: [any AnyTool<EmptyContext>]) -> AsyncThrowingStream<String, Error>
 }
 
@@ -23,11 +24,8 @@ struct FoundationModelsTurnRunner: OnDeviceTurnRunner {
             let pump = Task {
                 do {
                     let session = makeOnDeviceSession(model, tools: FMNoteTools.make(tools), instructions: instructions)
-                    var sent = ""
                     for try await snapshot in session.streamResponse(to: prompt, options: options) {
-                        let delta = FoundationModelsTextClient.delta(from: sent, to: snapshot.content)
-                        if !delta.isEmpty { continuation.yield(delta) }
-                        sent = snapshot.content
+                        continuation.yield(snapshot.content)
                     }
                     continuation.finish()
                 } catch {
