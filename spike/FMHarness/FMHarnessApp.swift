@@ -87,6 +87,8 @@ struct SpikeView: View {
                         startAllExperiments(only: [.foldToolUserOnly, .foldToolFact])
                     }
                     .disabled(running != nil)
+                    Button("実験 E を全部実行（本体の設定を再現、greedy）") { startExperimentE() }
+                        .disabled(running != nil)
                     Button("結果だけコピー（400字以内）") { UIPasteboard.general.string = log.summaryText }
                     if !log.summaries.isEmpty {
                         Text(log.summaryText).font(.caption.monospaced())
@@ -186,6 +188,19 @@ struct SpikeView: View {
             }
             approvals.autoApprove = false
             if backend == .mlx { log.add(Probes.memorySummary()) }
+            running = nil
+        }
+    }
+
+    private func startExperimentE() {
+        let trials = trials
+        running = Task {
+            approvals.autoApprove = true
+            for config in ConfigE.allCases where !Task.isCancelled {
+                await ExperimentE.run(config, trials: trials, log: log, notes: notes, approvals: approvals)
+            }
+            approvals.autoApprove = false
+            log.add(Probes.memorySummary())
             running = nil
         }
     }
