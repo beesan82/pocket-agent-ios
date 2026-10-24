@@ -277,6 +277,7 @@ final class SpeechCapture: TranscriptSource {
     private func report(_ result: SpeechTranscriber.Result, text: String, language: String) {
         guard result.isFinal else {
             laneVolatile[language] = text
+            events?.yield(.laneVolatile(language: language, text: text))
             return
         }
         laneVolatile[language] = nil

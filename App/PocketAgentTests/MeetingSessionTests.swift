@@ -9,6 +9,7 @@ import Testing
 final class FakeTranscriptSource: TranscriptSource {
     var reason: SpeechUnavailableReason?
     var failStart = false
+    var elapsed: TimeInterval = 0
     /// Yielded inside `stop()` before the stream ends (the real capture finalizes its last results then).
     var finalOnStop: TranscriptSegment?
     private(set) var startCount = 0

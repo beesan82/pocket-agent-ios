@@ -6,6 +6,8 @@ import PocketAgentRuntime
 /// One meeting: live segments from a `TranscriptSource`, notes rewritten on device from the
 /// transcript in increments (only while the app is in front), and one journal entry at the end.
 /// Owned by the app, so leaving the tab or locking the phone does not end the recording.
+/// Bilingual (ja/en): a two-language capture's candidates go through `LanguageArbiter`, and each
+/// accepted utterance is translated on device into the other language (best effort).
 @MainActor
 @Observable
 final class MeetingSession {
@@ -34,10 +36,13 @@ final class MeetingSession {
     private(set) var notesPhase: NotesPhase = .idle
     private(set) var startedAt: Date?
     private(set) var isForeground = true
+    /// Two languages (ja/en) for the next meeting; see `setBilingual`.
+    private(set) var bilingual = false
 
-    /// Final text not yet reflected in the notes (a running update's batch excluded).
+    /// Final text not yet reflected in the notes (a running update's batch excluded), counted on
+    /// the Japanese side (an English utterance counts by its translation once it has one).
     var pendingCharacters: Int {
-        segments[(updatingUpTo ?? reflectedCount)...].reduce(0) { $0 + $1.text.count }
+        segments[(updatingUpTo ?? reflectedCount)...].reduce(0) { $0 + $1.japaneseSide.count }
     }
 
     var modelReady: Bool { assistant != nil }
@@ -53,8 +58,30 @@ final class MeetingSession {
 
     @ObservationIgnored private(set) var notesTask: Task<Void, Never>?
 
-    /// The capture (the screen reads its availability and asks for permissions / assets).
-    @ObservationIgnored let source: any TranscriptSource
+    /// On-device translation for bilingual meetings; nil means none (pairs not installed). Set by the screen.
+    @ObservationIgnored var translator: (any Translating)? {
+        didSet { queueUntranslated() }
+    }
+    /// How long 「終了」 waits for translations still running before saving.
+    @ObservationIgnored var translationWait: Duration = .seconds(10)
+    static let maxTranslationAttempts = 3
+    @ObservationIgnored private(set) var translationTask: Task<Void, Never>?
+
+    /// The capture for the current setting (the screen reads its availability and asks for permissions / assets).
+    var source: any TranscriptSource {
+        bilingual ? (bilingualSource ?? singleSource) : singleSource
+    }
+    @ObservationIgnored private let singleSource: any TranscriptSource
+    @ObservationIgnored private let bilingualSource: (any TranscriptSource)?
+    /// The running (or last) capture is a two-language one.
+    @ObservationIgnored private var captureIsBilingual = false
+    @ObservationIgnored private var arbiter = LanguageArbiter()
+    @ObservationIgnored private var tickTask: Task<Void, Never>?
+    @ObservationIgnored private var laneVolatile: [String: String] = [:]
+    @ObservationIgnored private var lastLanguage: String?
+    @ObservationIgnored private var translationQueue: [UUID] = []
+    @ObservationIgnored private var translatingID: UUID?
+    @ObservationIgnored private var translationAttempts: [UUID: Int] = [:]
     @ObservationIgnored private let store: any JournalStore
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private var reflectedCount = 0
@@ -69,13 +96,24 @@ final class MeetingSession {
     @ObservationIgnored private var captureOffset: TimeInterval = 0
 
     init(
-        source: any TranscriptSource, store: any JournalStore, assistant: (any JournalAssisting)?,
+        source: any TranscriptSource, bilingualSource: (any TranscriptSource)? = nil,
+        translator: (any Translating)? = nil, store: any JournalStore, assistant: (any JournalAssisting)?,
         now: @escaping @MainActor () -> Date = Date.init
     ) {
-        self.source = source
+        self.singleSource = source
+        self.bilingualSource = bilingualSource
+        self.translator = translator
         self.store = store
         self.assistant = assistant
         self.now = now
+    }
+
+    /// Chooses one or two languages for the next meeting; ignored while a meeting is open.
+    func setBilingual(_ value: Bool) {
+        switch state {
+        case .idle, .saved, .failed: bilingual = value && bilingualSource != nil
+        case .preparing, .recording, .paused, .finishing: break
+        }
     }
 
     // MARK: Recording
@@ -101,6 +139,7 @@ final class MeetingSession {
     func setForeground(_ value: Bool) {
         isForeground = value
         if value {
+            queueUntranslated()
             beginAutoUpdateIfNeeded()
         } else {
             // On-device generation cannot run in the background; the partial output is dropped.
@@ -112,11 +151,23 @@ final class MeetingSession {
         captureGeneration += 1
         let generation = captureGeneration
         let captureStart = now()
+        captureIsBilingual = bilingual && bilingualSource != nil
         do {
             let events = try await source.start()
             guard generation == captureGeneration else { return }
             captureOffset = startedAt.map { captureStart.timeIntervalSince($0) } ?? 0
             state = .recording
+            if captureIsBilingual {
+                // Each capture restarts its clock: a fresh arbiter, decided every half second.
+                arbiter = LanguageArbiter()
+                tickTask?.cancel()
+                tickTask = Task { [weak self] in
+                    while !Task.isCancelled {
+                        self?.tick()
+                        try? await Task.sleep(for: .milliseconds(500))
+                    }
+                }
+            }
             consumeTask = Task { [weak self] in
                 for await event in events {
                     guard let self, generation == self.captureGeneration else { return }
@@ -140,26 +191,110 @@ final class MeetingSession {
             segments.append(TranscriptSegment(id: segment.id, offset: captureOffset + segment.offset, text: segment.text))
             beginAutoUpdateIfNeeded()
         case let .failed(text):
+            drainArbiter()
             volatileText = ""
             if state == .recording { state = .paused(text) }
         case .interruptionEnded:
             if case .paused = state {
                 Task { await resume() }
             }
-        case .candidate:
-            break  // the meeting runs a single-language capture (bilingual meetings: stage B)
+        case let .candidate(candidate):
+            guard captureIsBilingual else { return }
+            accept(arbiter.submit(candidate))
+        case let .laneVolatile(language, text):
+            guard captureIsBilingual else { return }
+            laneVolatile[language] = text
+            volatileText = laneVolatile[lastLanguage ?? language] ?? text
         }
     }
 
     /// The source's stream ended without a failure event while we still expected input.
     private func captureEnded() {
+        drainArbiter()
         volatileText = ""
         if state == .recording { state = .paused(Self.pausedText) }
+    }
+
+    // MARK: Bilingual
+
+    /// Decides the held utterances whose wait is over (called every half second while recording).
+    func tick() {
+        guard captureIsBilingual else { return }
+        accept(arbiter.flush(now: source.elapsed))
+    }
+
+    private func drainArbiter() {
+        tickTask?.cancel()
+        tickTask = nil
+        guard captureIsBilingual else { return }
+        accept(arbiter.drain(now: source.elapsed))
+    }
+
+    private func accept(_ decisions: [ArbiterDecision]) {
+        var added = false
+        for decision in decisions {
+            for candidate in decision.accepted {
+                let segment = TranscriptSegment(
+                    offset: captureOffset + candidate.start, text: candidate.text, language: candidate.language)
+                segments.append(segment)
+                lastLanguage = candidate.language
+                laneVolatile[candidate.language] = nil
+                enqueueTranslation(segment.id)
+                added = true
+            }
+        }
+        guard added else { return }
+        volatileText = lastLanguage.flatMap { laneVolatile[$0] } ?? ""
+        beginAutoUpdateIfNeeded()
+    }
+
+    private func enqueueTranslation(_ id: UUID) {
+        guard captureIsBilingual, translator != nil, !translationQueue.contains(id), translatingID != id else { return }
+        translationQueue.append(id)
+        runTranslationsIfNeeded()
+    }
+
+    /// Untranslated utterances that still have attempts left (after a failure, or a translator set late).
+    private func queueUntranslated() {
+        guard captureIsBilingual, translator != nil else { return }
+        for segment in segments where segment.translation == nil
+            && translationAttempts[segment.id, default: 0] < Self.maxTranslationAttempts {
+            enqueueTranslation(segment.id)
+        }
+    }
+
+    private func runTranslationsIfNeeded() {
+        guard translationTask == nil, let translator, !translationQueue.isEmpty else { return }
+        translationTask = Task { [weak self] in
+            await self?.translateQueued(with: translator)
+        }
+    }
+
+    /// One at a time, in arrival order. A failure is counted and retried later (foreground, 「更新」).
+    private func translateQueued(with translator: any Translating) async {
+        while !translationQueue.isEmpty {
+            let id = translationQueue.removeFirst()
+            guard let segment = segments.first(where: { $0.id == id }), segment.translation == nil else { continue }
+            translatingID = id
+            do {
+                let output = try await translator.translate(segment.text, from: segment.language, to: segment.otherLanguage)
+                let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let index = segments.firstIndex(where: { $0.id == id }), !trimmed.isEmpty {
+                    segments[index] = segments[index].withTranslation(trimmed)
+                }
+            } catch {
+                translationAttempts[id, default: 0] += 1
+            }
+            translatingID = nil
+            if Task.isCancelled { break }
+        }
+        translationTask = nil
     }
 
     // MARK: Notes
 
     func updateNotesNow() {
+        queueUntranslated()
         guard isMeetingOpen,
               MeetingNotesPolicy.shouldManualUpdate(
                   pendingCharacters: pendingCharacters, modelReady: modelReady, isUpdating: notesPhase == .updating)
@@ -199,7 +334,7 @@ final class MeetingSession {
         guard let assistant, notesPhase != .updating, reflectedCount < segments.count else { return }
         let upTo = batchEnd()
         batchTruncated = upTo < segments.count
-        let newText = segments[reflectedCount..<upTo].map(\.text).joined(separator: "\n")
+        let newText = segments[reflectedCount..<upTo].map(\.japaneseSide).joined(separator: "\n")
         updatingUpTo = upTo
         lastUpdateStartedAt = now()
         notesGeneration += 1
@@ -234,7 +369,7 @@ final class MeetingSession {
         var end = reflectedCount
         var used = 0
         for index in reflectedCount..<segments.count {
-            let length = segments[index].text.count
+            let length = segments[index].japaneseSide.count
             if end > reflectedCount, used + length > budget { break }
             used += length
             end = index + 1
@@ -277,13 +412,26 @@ final class MeetingSession {
         await source.stop()
         await consumeTask?.value
         consumeTask = nil
+        drainArbiter()  // utterances still held for the language decision
         captureGeneration += 1
         volatileText = ""
         if notesPhase != .updating, pendingCharacters > 0, modelReady, isForeground {
             runUpdate()
         }
+        await waitForTranslations()
         if let notesTask { await notesTask.value }  // 「停止」 cancels it and returns here
         await save()
+    }
+
+    /// Up to `translationWait` for the queue to empty; what is not translated by then is saved without.
+    private func waitForTranslations() async {
+        let deadline = ContinuousClock.now + translationWait
+        while translationTask != nil, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        translationTask?.cancel()
+        translationTask = nil
+        translationQueue = []
     }
 
     func retrySave() async {
@@ -324,7 +472,20 @@ final class MeetingSession {
         stopNotesUpdate()
         consumeTask?.cancel()
         consumeTask = nil
-        if !keepingAssistant { assistant = nil }
+        tickTask?.cancel()
+        tickTask = nil
+        translationTask?.cancel()
+        translationTask = nil
+        translationQueue = []
+        translatingID = nil
+        translationAttempts = [:]
+        arbiter = LanguageArbiter()
+        laneVolatile = [:]
+        lastLanguage = nil
+        if !keepingAssistant {
+            assistant = nil
+            translator = nil
+        }
         segments = []
         volatileText = ""
         notes = ""

@@ -45,7 +45,12 @@ struct PocketAgentApp: App {
         _container = State(initialValue: container)
         let journal = container.map { SwiftDataJournalStore(modelContainer: $0) }
         _journal = State(initialValue: journal)
-        _meeting = State(initialValue: journal.map { MeetingSession(source: SpeechCapture(), store: $0, assistant: nil) })
+        _meeting = State(initialValue: journal.map {
+            MeetingSession(
+                source: SpeechCapture(),
+                bilingualSource: SpeechCapture(locales: [Locale(identifier: "ja_JP"), SpeechCapture.english]),
+                store: $0, assistant: nil)
+        })
     }
 
     var body: some Scene {

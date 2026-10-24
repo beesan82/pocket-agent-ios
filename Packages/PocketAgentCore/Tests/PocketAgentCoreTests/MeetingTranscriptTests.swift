@@ -22,6 +22,26 @@ struct MeetingTranscriptTests {
         #expect(MeetingTranscriptFormatter.text([]) == "")
     }
 
+    @Test func textIncludesLanguageMarkAndTranslation() {
+        let segments = [
+            TranscriptSegment(offset: 1, text: "こんにちは", language: "ja", translation: "Hello"),
+            TranscriptSegment(offset: 5, text: "Thanks", language: "en", translation: "ありがとう"),
+            TranscriptSegment(offset: 9, text: "Pending", language: "en"),
+        ]
+        #expect(MeetingTranscriptFormatter.text(segments)
+            == "[00:01] こんにちは\n    → Hello\n[00:05] (EN) Thanks\n    → ありがとう\n[00:09] (EN) Pending")
+    }
+
+    @Test func japaneseSidePrefersTranslationForEnglish() {
+        #expect(TranscriptSegment(offset: 0, text: "Thanks", language: "en", translation: "ありがとう").japaneseSide == "ありがとう")
+        #expect(TranscriptSegment(offset: 0, text: "Thanks", language: "en").japaneseSide == "Thanks")
+        #expect(TranscriptSegment(offset: 0, text: "はい", language: "ja", translation: "Yes").japaneseSide == "はい")
+        #expect(TranscriptSegment(offset: 0, text: "はい").otherLanguage == "en")
+        let translated = TranscriptSegment(offset: 3, text: "Hi", language: "en").withTranslation("やあ")
+        #expect(translated.translation == "やあ")
+        #expect(translated.offset == 3)
+    }
+
     @Test func autoUpdateNeedsAllConditions() {
         #expect(MeetingNotesPolicy.minPendingCharacters == 300)
         #expect(MeetingNotesPolicy.minInterval == 60)

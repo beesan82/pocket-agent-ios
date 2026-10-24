@@ -193,7 +193,7 @@ struct BilingualGateSection: View {
             decisions += arbiter.submit(candidate)
         case let .failed(text):
             message = text
-        case .volatile, .final, .interruptionEnded:
+        case .volatile, .final, .interruptionEnded, .laneVolatile:
             break
         }
     }

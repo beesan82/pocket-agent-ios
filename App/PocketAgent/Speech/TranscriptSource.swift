@@ -13,6 +13,8 @@ enum TranscriptEvent: Sendable, Equatable {
     /// Bilingual capture only: one recognizer's final result with its confidence; the consumer
     /// decides the language (`LanguageArbiter`). A bilingual capture sends these instead of `.final`.
     case candidate(LaneCandidate)
+    /// Bilingual capture only: one recognizer's latest tentative text.
+    case laneVolatile(language: String, text: String)
 }
 
 /// A live on-device transcription the meeting session can start, stop and listen to.
@@ -20,6 +22,8 @@ enum TranscriptEvent: Sendable, Equatable {
 @MainActor
 protocol TranscriptSource: AnyObject {
     var reason: SpeechUnavailableReason? { get }
+    /// Seconds since the current capture's audio started (the clock of `.candidate` times).
+    var elapsed: TimeInterval { get }
     func refreshAvailability() async
     func requestPermissions() async
     func installAssets() async throws
