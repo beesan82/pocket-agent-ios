@@ -52,7 +52,6 @@ jobs:
         run: swift test
 
       - name: Runtime package tests (FakeLLM, AT-05/08/09)
-        continue-on-error: true  # TEMP: RED on fix-remember-rule only
         working-directory: Packages/PocketAgentRuntime
         run: swift test
 
