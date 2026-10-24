@@ -16,6 +16,7 @@ struct ChatSessionLocalTests {
     private let settings: ModelSettings
     private let broker = ApprovalBroker()
     private let notes = InMemoryNoteStore()
+    private let journal = InMemoryJournalStore()
 
     /// What the on-device model wrote on the iPhone instead of calling save_note.
     private static let rescuableSaveReply =
@@ -33,6 +34,8 @@ struct ChatSessionLocalTests {
 
     private func makeSession(
         _ conversation: ConversationRecord,
+        notes customNotes: (any MemoryStore)? = nil,
+        journal customJournal: (any JournalStore)? = nil,
         onDevice: any OnDeviceModelAccess,
         log: @escaping @MainActor (String) -> Void = { _ in },
         resolve: @escaping ClientResolver = { _ in
@@ -41,7 +44,8 @@ struct ChatSessionLocalTests {
         }
     ) -> ChatSession {
         ChatSession(
-            conversation: conversation, repository: repository, notes: notes,
+            conversation: conversation, repository: repository, notes: customNotes ?? notes,
+            journal: customJournal ?? journal,
             settings: settings, broker: broker, resolve: resolve, onDevice: onDevice, log: log)
     }
 
@@ -136,6 +140,67 @@ struct ChatSessionLocalTests {
             previous: [ChatTurn(role: .user, text: "一回目"), ChatTurn(role: .assistant, text: "Claude の答え")],
             current: "二回目"))
         #expect(!prompt.contains("Claude の答え"))
+    }
+
+    // MARK: - Journal lookup (日誌に聞く merged into chat)
+
+    @Test(arguments: [ModelChoice.appleLocal, .mlxLocal])
+    func onDeviceInstructionsIncludeJournalSection(_ choice: ModelChoice) async throws {
+        settings.choice = choice
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "ポチの散歩 朝7時"))
+        let runner = ScriptedTurnRunner([[.text("朝7時です")]])
+        let session = makeSession(try repository.create(choice: choice), onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("ポチの散歩はいつ？")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+
+        let instructions = try #require(runner.calls.first?.instructions)
+        #expect(instructions.contains(ConversationContext.journalLookupHeader))
+        #expect(instructions.contains("ポチの散歩 朝7時"))
+    }
+
+    // A turn with matching entries drops the memory section's "recent journal" part; a turn
+    // without keeps it.
+    @Test func journalSectionReplacesRecentJournal() async throws {
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "ポチの散歩 朝7時"))
+        let runner = ScriptedTurnRunner([[.text("朝7時です")], [.text("こんにちは")]])
+        let session = makeSession(
+            try repository.create(choice: .mlxLocal), notes: JournalNoteStore(journal: journal),
+            onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("ポチの散歩はいつ？")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        session.send("こんにちは")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 4 })
+
+        let first = try #require(runner.calls.first?.instructions)
+        #expect(first.contains(ConversationContext.journalLookupHeader))
+        #expect(!first.contains(ConversationContext.journalHeader))
+        let second = try #require(runner.calls.last?.instructions)
+        #expect(!second.contains(ConversationContext.journalLookupHeader))
+        #expect(second.contains(ConversationContext.journalHeader))
+    }
+
+    @Test func noJournalNoSection() async throws {
+        let runner = ScriptedTurnRunner([[.text("こんにちは")]])
+        let session = makeSession(try repository.create(choice: .mlxLocal), onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("先週の会議は？")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+
+        #expect(runner.calls.first?.instructions == ConversationContext.onDeviceInstructions(memorySection: nil))
+    }
+
+    @Test func lookupFailureStillAnswers() async throws {
+        let runner = ScriptedTurnRunner([[.text("こんにちは")]])
+        let session = makeSession(
+            try repository.create(choice: .mlxLocal), journal: ThrowingJournalStore(),
+            onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("先週の会議は？")
+
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        #expect(runner.calls.first?.instructions.contains(ConversationContext.journalLookupHeader) == false)
     }
 
     // MARK: - Note tools

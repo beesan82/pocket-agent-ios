@@ -57,3 +57,18 @@ final class LogLines {
         entries.append(line)
     }
 }
+
+/// A journal store whose every call fails, for the "journal lookup failed" path.
+struct ThrowingJournalStore: JournalStore {
+    struct Failure: Error {}
+
+    func add(_: NewJournalEntry) async throws -> JournalEntry { throw Failure() }
+    func all() async throws -> [JournalEntry] { throw Failure() }
+    func search(_: String) async throws -> [JournalEntry] { throw Failure() }
+    func entries(in _: DateInterval) async throws -> [JournalEntry] { throw Failure() }
+    func recent(limit _: Int) async throws -> [JournalEntry] { throw Failure() }
+    func entry(id _: UUID) async throws -> JournalEntry? { throw Failure() }
+    func update(id _: UUID, body _: String) async throws -> JournalEntry? { throw Failure() }
+    func delete(id _: UUID) async throws -> Bool { throw Failure() }
+    func deleteAll() async throws { throw Failure() }
+}

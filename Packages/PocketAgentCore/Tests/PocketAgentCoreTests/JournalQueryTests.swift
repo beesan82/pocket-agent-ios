@@ -101,6 +101,29 @@ struct JournalQueryTests {
         #expect(SearchTerms.fallback(question: "a 会議\u{3000}会議 予算!") == ["会議", "予算"])
     }
 
+    // Chat looks the journal up every turn without a model call: keep kanji / katakana / latin runs,
+    // drop hiragana runs (particles and endings).
+    @Test func keywordsDropParticlesAndQuestionWords() {
+        #expect(SearchTerms.keywords(question: "ポチの散歩はいつ？") == ["ポチ", "散歩"])
+        #expect(SearchTerms.keywords(question: "先週の会議の結論は？") == ["先週", "会議", "結論"])
+        #expect(SearchTerms.keywords(question: "うちの犬の名前はココだよ") == ["犬", "名前", "ココ"])
+    }
+
+    @Test func keywordsOfAQuestionWordAloneAreEmpty() {
+        #expect(SearchTerms.keywords(question: "いつ？") == [])
+        #expect(SearchTerms.keywords(question: "何があった？") == [])
+    }
+
+    @Test func keywordsDedupeAndCap() {
+        #expect(SearchTerms.keywords(question: "歯医者 歯医者 予約") == ["歯医者", "予約"])
+        let many = "赤、青、黄、緑、紫、橙、茶、灰、白、黒"
+        #expect(SearchTerms.keywords(question: many).count == SearchTerms.maxTerms)
+    }
+
+    @Test func keywordsKeepLatinAndDigits() {
+        #expect(SearchTerms.keywords(question: "iPhoneの修理は10月?") == ["iPhone", "修理", "10月"])
+    }
+
     // MARK: retrieval
 
     @Test func dateRangeWithNoTermHitsUsesWholeRange() {

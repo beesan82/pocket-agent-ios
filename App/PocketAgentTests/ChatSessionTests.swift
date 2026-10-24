@@ -128,6 +128,7 @@ struct ChatSessionTests {
     private let settings: ModelSettings
     private let broker = ApprovalBroker()
     private let notes = InMemoryNoteStore()
+    private let journal = InMemoryJournalStore()
 
     init() throws {
         container = try AppModelContainer.make(inMemory: true)
@@ -148,7 +149,7 @@ struct ChatSessionTests {
         resolve: @escaping ClientResolver
     ) -> ChatSession {
         ChatSession(
-            conversation: conversation, repository: repository, notes: customNotes ?? notes,
+            conversation: conversation, repository: repository, notes: customNotes ?? notes, journal: journal,
             settings: settings, broker: broker, resolve: resolve, onDevice: onDevice, log: log)
     }
 
@@ -282,6 +283,24 @@ struct ChatSessionTests {
         }
         #expect(system.hasPrefix(ConversationContext.systemPrompt))
         #expect(system.contains("あなたの名前はケイタ"))
+    }
+
+    // The user allowed journals to go to Claude (2026-10-24): looked-up entries follow memory in the system message.
+    @Test func claudeSystemIncludesJournalSection() async throws {
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "週次定例 次回は11/4", title: "会議"))
+        let claude = FakeLLMClient([.finish("11/4 です")])
+        let session = makeSession(try repository.create(choice: .claude)) { _ in .success(claude) }
+
+        session.send("会議の次回はいつ？")
+        #expect(try await waitUntil { session.status == .idle })
+
+        guard case let .system(system)? = await claude.requests.first?.first else {
+            Issue.record("no system message")
+            return
+        }
+        #expect(system.hasPrefix(ConversationContext.systemPrompt))
+        #expect(system.contains(ConversationContext.journalLookupHeader))
+        #expect(system.contains("会議: 週次定例 次回は11/4"))
     }
 
     @Test func memoryReadFailureStillAnswers() async throws {
