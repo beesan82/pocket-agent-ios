@@ -198,11 +198,11 @@ private struct ChatContent: View {
             HStack {
                 Text(reason.userMessage).font(.caption).foregroundStyle(.secondary)
                 switch reason {
-                case .assetsNotInstalled, .englishAssetsNotInstalled:
+                case .assetsNotInstalled, .languageAssetsNotInstalled:
                     Button("音声データを入手") { confirmInstall = true }.font(.caption)
                 case .permissionDenied:
                     Button("マイクと音声認識を許可") { Task { await speech.requestPermissions() } }.font(.caption)
-                case .moduleUnavailable, .japaneseUnsupported, .englishUnsupported:
+                case .moduleUnavailable, .japaneseUnsupported, .languageUnsupported:
                     EmptyView()
                 }
             }
