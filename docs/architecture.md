@@ -17,15 +17,14 @@ Packages/PocketAgentCore (純Swift, Foundationのみ)  ← Windows/Linuxでも `
   └─ Ports         : ModelProvider, CredentialStore, HistoryRepository（protocol）
         │
         ▼
-Packages/PocketAgentRuntime (AgentRunKit 6.1.0 に依存)
+Packages/PocketAgentRuntime (AgentRunKit フォーク 6.1.0-pocket.1 に依存、ADR-036)
   ├─ AgentRunner   : Agent を包み、承認必須・セッション承認の格下げ・キャンセル変換を強制
   └─ Tests         : ScriptedLLMClient（FakeLLM）で AT-05/08/09 を検証
         │
         ▼
 App/PocketAgent/Adapters (AgentRunKit / Apple SDK 依存はここに閉じ込める)
   ├─ ClaudeAdapter       → AgentRunKit.AnthropicClient（Claude Messages API）
-  ├─ AppleLocalAdapter   → AgentRunKitFoundationModels.FoundationModelsClient
-  ├─ MLXAdapter          → AgentRunKitMLX（Phase 2）
+  ├─ OnDevice/           → Foundation Models `LanguageModelSession`（SystemLanguageModel / MLXLanguageModel、ADR-037）
   ├─ KeychainCredentialStore
   └─ SwiftDataHistoryRepository
 ```

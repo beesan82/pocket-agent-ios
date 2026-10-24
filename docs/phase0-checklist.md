@@ -206,3 +206,18 @@
 - [ ] 遅延・最小空きメモリ・発熱
 - [ ] 翻訳データの同意シート（方向ごと）と翻訳テストの所要秒
 
+## 第2段階: 端末内モデルを Foundation Models へ（ADR-036/037）
+設計: docs/superpowers/specs/2026-10-23-stage2-fm-harness-design.md / 計画: docs/superpowers/plans/2026-10-23-stage2-fm-harness.md
+
+### 実装済み（CI で自動テスト合格）
+- [x] AgentRunKit フォーク（MLX なし）＋mlx-swift-lm 3.32.3、pin は `App/Package.resolved`
+- [x] 日誌・会議・検証画面は `FoundationModelsTextClient`、MLX は `MLXLanguageModel`（ローカルディレクトリのみ）
+- [x] 端末内チャットは両モデル共通: 毎ターン新しいセッション、greedy、ユーザー発言だけ畳み込み、メモツール 5 種（承認付き）、救済と「メモ非対応」表示
+
+### 実機で未検証（手順: docs/verification/2026-10-24-stage2-on-device-tools.md）
+- [ ] 更新前にダウンロード済みのモデルが再ダウンロードなしで読み込める
+- [ ] iPhone 15（Qwen2.5 1.5B）で 1・2 ターン目とも承認シートから保存できる
+- [ ] iPhone 18,5（Apple）で保存できる／呼べないときに救済か非対応表示が出る
+- [ ] 承認待ちで停止すると何も保存されない
+- [ ] 日誌の要約・日誌に聞く・会議の要点が更新前と同等に動く
+- [ ] 機内モードで MLX を読み込める

@@ -15,11 +15,11 @@ settings:
     DEVELOPMENT_TEAM: ""
 
 packages:
-  # Fork of AgentRunKit 6.1.0 without AgentRunKitMLX and its mlx-swift-lm 2.30.x pin (ADR-035).
+  # Fork of AgentRunKit 6.1.0 without AgentRunKitMLX and its mlx-swift-lm 2.30.x pin (ADR-036).
   AgentRunKit:
     url: https://github.com/beesan82/AgentRunKit.git
     exactVersion: 6.1.0-pocket.1
-  # On-device models through Foundation Models: MLXFoundationModels (MLXLanguageModel), ADR-035/036.
+  # On-device models through Foundation Models: MLXFoundationModels (MLXLanguageModel), ADR-036/037.
   mlx-swift-lm:
     url: https://github.com/ml-explore/mlx-swift-lm
     exactVersion: 3.32.3

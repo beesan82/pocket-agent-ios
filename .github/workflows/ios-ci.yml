@@ -48,12 +48,10 @@ jobs:
         run: xcodebuild -downloadComponent MetalToolchain
 
       - name: Core package tests
-        continue-on-error: true  # TEMP: RED runs on stage2-fm-harness; remove before main
         working-directory: Packages/PocketAgentCore
         run: swift test
 
       - name: Runtime package tests (FakeLLM, AT-05/08/09)
-        continue-on-error: true  # TEMP: RED runs on stage2-fm-harness; remove before main
         working-directory: Packages/PocketAgentRuntime
         run: swift test
 
@@ -106,7 +104,6 @@ jobs:
 
       - name: Unit tests (iOS Simulator)
         if: ${{ !inputs.packages_only }}
-        continue-on-error: true  # TEMP: RED runs on stage2-fm-harness; remove before main
         run: |
           set -o pipefail
           DEST_ID=$(bash ci/pick-simulator.sh)

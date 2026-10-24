@@ -57,7 +57,7 @@
 - Apple ローカルにツールを渡すときは必ず `ToolApprovalGate.wrap` の戻り値を使う。チャットは Apple ローカルのクライアントへ、`ToolApprovalGate.wrap` で包んだ 5 つのメモツール（save_note / edit_note / list_notes / search_notes / delete_note）を渡している。承認シートで拒否された呼び出しも「試行」として記録される（ADR-028）。
 - 検証: `ApprovalGatedToolTests` 8 件（CI run 39101910024）。FoundationModels セッション内からの実呼び出しは第1段階の TestFlight で確認予定（docs/verification/2026-10-19-apple-local-tools.md）。
 - 影響要件: FR-05, AT-05, AT-08
-- 状態: 採用
+- 状態: 採用 → 置き換え: ADR-037（端末内は FM セッション内のツールを `Tool.call` の中で承認）
 
 ## ADR-010 APIキーは Keychain generic password（ThisDeviceOnly）
 - 決定: `KeychainCredentialStore`（service `com.beesan82.pocketagent.anthropic`（2026-10-18 に Bundle ID 確定に合わせて変更。実機インストール前なので移行不要） / account `api-key`、`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`）。保存は Update→なければ Add。エラーは `OSStatus` だけを持つ `KeychainError`。
@@ -111,7 +111,7 @@
 - 経緯: 最終レビュー（C1）で発見。テストの fake（`FakeLLMClient.foundationModelsContract`）が mapper の制約を再現するようになった。
 - 検証: `ConversationContextTests.appleLocalPrompt*`、`ChatSessionTests.appleLocalSecondTurnSendsOneFoldedPrompt`（CI run 39114462235）。実際の Foundation Models に対する複数ターンは実機未検証。
 - 影響要件: FR-02, US-03, AT-02, AT-14
-- 状態: 採用（実機未検証）
+- 状態: 採用（実機未検証） → 置き換え: ADR-037（毎ターン新しいセッション、ユーザー発言だけを畳み込む）
 
 ## ADR-018 RED/GREEN コミットを main へ直接 push（計画の一時ブランチ案からの逸脱）
 - 決定: TDD の RED コミットと GREEN コミットをいずれも main へ直接 push し、RED は CI 実行の完了を待って失敗理由（アサーション失敗、コンパイルエラーでない）を確認した。
@@ -239,10 +239,33 @@
 - 理由: Claude API を使わない利用者（iPhone 15、Apple Intelligence 非対応）がチャットを使えるようにする。ツール対応は FM ハーネスの第 2 段階で置き換える可能性がある。
 - 検証: Core `mlxLocalNeverReadsKeyOrBuildsClients`、Runtime `LocalChatTests`、App `ChatSessionLocalTests`（`mlxLocalNeverTouchesResolverOrKey`、`stopDoesNotSavePartial`、`unloadDuringStreamDoesNotSavePartial` ほか）、`ModelSettingsTests`（移行）。CI run 39476767480（App 148 件）。
 - 影響要件: FR-02, FR-03, AT-03, AT-14
-- 状態: 採用（設定の階層 UI、チャット往復、機内モード、停止、ダイアログ表示は実機未検証）
+- 状態: 採用（設定の階層 UI、チャット往復、機内モード、停止、ダイアログ表示は実機未検証） → 置き換え: ADR-037（`.mlxLocal` もメモツール付き。`LocalChat` は削除）
 
 ## ADR-032 日誌タブは設定の端末内モデルに従う（Apple が使えれば Apple、それ以外はダウンロードモデル）
 - 決定: 日誌の要約と「日誌に聞く」は、設定で Apple を選んでいてこの端末で使えるなら Apple（`FoundationModelsClient`、ツールなし）、それ以外（Claude 選択時、ダウンロードモデル選択時、Apple 不可の端末）はダウンロードモデルを使う（ユーザー判断、2026-10-22）。Claude は日誌に使わず、日誌の経路は API キーを読まない。判定は Core の `JournalModelRule`。Apple 選択で使えない場合は「Apple は使えないため、ダウンロードモデルを使います」と表示する。Apple は文脈が小さい（約 4096 トークン）ため、「日誌に聞く」に詰める日誌は Apple 1500 字、ダウンロードモデル 3000 字。要約の入力は切り詰めず、超過時は既存の固定の失敗文を出す。ADR-026 までの「日誌は常にダウンロードモデル」を置き換える。
 - 検証: `JournalModelRuleTests`（4 規則＋可用性は Apple 選択時のみ確認）、`JournalAssistantTests.askUsesContextBudget`、`JournalModelAccessTests`（Apple は読み込みなしで準備完了、ダウンロードモデル経路は従来どおり）。CI run 39692758413（Core 87 / Runtime 96 / App 156）。
 - 影響要件: FR-15, AT-14
-- 状態: 採用（Apple での要約・質問は実機未検証: シミュレータでは動かず、iPhone 15 は Apple Intelligence 非対応。1500 字が文脈に収まるかも未確認）
+- 状態: 採用（Apple での要約・質問は実機未検証: シミュレータでは動かず、iPhone 15 は Apple Intelligence 非対応。1500 字が文脈に収まるかも未確認） → Apple の日誌経路は ADR-037 の `FoundationModelsTextClient` に置き換え
+
+## ADR-036 AgentRunKit をフォーク（MLX なし）にし、mlx-swift-lm 3.32.3 の MLXFoundationModels を使う
+- 決定: AgentRunKit は `https://github.com/beesan82/AgentRunKit` タグ `v6.1.0-pocket.1`（本家 6.1.0 から `AgentRunKitMLX` ターゲット・製品・テストと mlx-swift-lm 依存だけを外したもの）を exact で使う。端末内モデルは mlx-swift-lm 3.32.3（`MLXFoundationModels` / `MLXHuggingFace` / `MLXLLM` / `MLXLMCommon`）、mlx-swift 0.32.3、swift-huggingface 0.13.0（ダウンロード）、swift-transformers 1.3.5（tokenizer）で動かす。アプリの pin は `App/Package.resolved`（アプリ全体のグラフ）にコミットし、CI と Codemagic はこれを xcodeproj に複写して解決し、ずれたら失敗させる。Runtime パッケージ単体は AgentRunKit だけを解決するので、その `Package.resolved` は追跡しない。MLX のマクロ（`#huggingFaceTokenizerLoader`）のため、`xcodebuild` に `-skipMacroValidation -skipPackagePluginValidation`、Codemagic は `defaults write`（マクロ・プラグインの指紋確認を省く）と `--archive-flags="..."`。
+- 理由: 本家 6.1.0 は mlx-swift-lm を `.upToNextMinor(from: "2.30.0")` で宣言しており、MLX 製品を使わなくても 3.32.3 と同じグラフに入らない（CI run 39808046945）。フォークなら解決できる（run 39863746172）。端末内は Foundation Models に移すので AgentRunKitMLX は不要（ユーザー判断、2026-10-23）。
+- ダウンロード: `HubClient(cache: nil).downloadSnapshot(of:kind:to:revision:matching:progressHandler:)` で `AppSupport/Models/models/<repo id>` に直接置く（キャッシュを使うと 2 重に保存されるため）。旧 `HubApi.snapshot` と同じ場所なので、ダウンロード済みの端末は再ダウンロード不要（`downloaderDirectoryLayoutUnchanged`）。
+- 戻し方: 本家が mlx-swift-lm 3.x に追従したら本家の版に戻す。
+- 検証: CI run 40065168351（Core 94 / Runtime 104 / App 179、pin 一致 13 件、シミュレータ・実機ビルド）。
+- 影響要件: ADR-002（pin 固定）、FR-15, Phase 2
+- 状態: 採用（実機での読み込み・ダウンロードは未検証）
+
+## ADR-037 端末内のチャット・日誌・会議は Foundation Models。端末内チャットは毎ターン新しいセッション＋greedy＋ユーザー発言だけ畳み込み、メモツールは両端末内モデルで承認付き
+- 決定:
+  - 端末内のモデルは `SystemLanguageModel.default`（Apple）と `MLXLanguageModel`（ダウンロードモデル、`capabilities: [.toolCalling]`、ローカルディレクトリからのみ読み込み）。どちらも `LanguageModelSession` で使う。
+  - チャット（`.appleLocal` / `.mlxLocal` 共通、`ChatSession.sendOnDevice`）: 毎ターン新しいセッション、`GenerationOptions(sampling: .greedy, maximumResponseTokens: 512)`。instructions は `ConversationContext.onDeviceInstructions`（Claude と同じ規則＋保存済みメモ）。プロンプトは `LocalAgentPrompt.fold`（前の**ユーザー発言だけ**を最大 6 件・1500 字で畳み込み、アシスタントの返答・ツール結果は入れない）。
+  - メモツール 5 種を両モデルに: `NoteTools` → `ToolApprovalGate`（書き込みは承認必須、ネイティブの読み取りは承認なし）→ 記録 → `FMNoteTools`（`@Generable` 引数を JSON にして `NoteToolBridge` 経由で実行）。承認待ちで停止すると `CancellationError` で何も保存しない。「この会話では常に許可」は会話単位（`ConversationApprovals`）。
+  - ネイティブ呼び出しが無い返答は救済（`ToolCallRescue` → 必ず承認）、`toolcall.*` ログ、`ToolCapabilityTracker` の「メモ非対応」表示を**両端末内モデル**に適用（Claude には出さない）。
+  - 日誌・「日誌に聞く」・会議の要点・MLX 検証画面は `FoundationModelsTextClient`（AgentRunKit の `LLMClient` 準拠、毎回新しいセッション、`max_tokens` / `temperature` だけを渡し `top_p` / `repetition_penalty` は捨てる）。
+  - Claude は `AgentRunner` のまま（変更なし）。resolver は `.appleLocal` をツールなしの text client に解決するが、チャットからは使わない。
+- 理由（スパイク `spike/fm-harness`、iPhone 15 / iOS 27.0.1、MLX Qwen2.5 1.5B）: 1 ターン目のツール呼び出しは greedy で 5/5、既定（温度 0.6）は 4/5 で崩れた本文が出る。同じセッションの 2 ターン目以降は 0/5（雑談の後でも）で、保存後は「保存しました」と偽る。毎ターン新しいセッション＋ユーザー発言だけの畳み込みで 5/5、アシスタント返答や「（処理済み）」を畳み込むと失敗。Apple 端末内モデル（iPhone 18,5）は手動では保存できたが、連続実験ではほぼ呼ばずに偽る。救済と非対応表示はその対策として残す。
+- 置き換え: ADR-009（Apple ローカルへのツール配置の方式）、ADR-017（Apple の畳み込みは `appleLocalPrompt`）、ADR-031（`.mlxLocal` はツールなし・`LocalChat`）、ADR-032 の「Apple は `FoundationModelsClient`」の部分。
+- 検証: Runtime `LocalAgentPromptTests`、App `ChatSessionLocalTests`（`nativeSaveAsksAndSaves`・`stopWhileApprovalPendingSavesNothing`・`rescuedJSONAsksAndSaves`・`twoMissesMarkLimitedForBothLocalModels` を両モデルで、`secondTurnFoldsOnlyUserTurnsAndInjectsMemory`、`switchingFromClaudeFoldsOnlyUserTurns`、`onDeviceNeverReadsKey` ほか）、`NoteToolBridgeTests`、`OnDeviceGenerationTests`。CI run {{RUN}}。
+- 影響要件: FR-04, FR-05, FR-10, 6.4, AT-05, AT-08, AT-14
+- 状態: 採用（実機未検証。手順: docs/verification/2026-10-24-stage2-on-device-tools.md）

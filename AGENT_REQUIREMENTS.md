@@ -66,8 +66,8 @@
 | 言語 | Swift 6系、Swift Concurrency、strict concurrencyを段階的に有効化 |
 | エージェントハーネス | AgentRunKit（初期検証対象: v6.1.0。CIで解決版をロック） |
 | クラウドモデル | AgentRunKit `AnthropicClient` / Claude Messages API |
-| ローカルモデル1 | `AgentRunKitFoundationModels`、Apple Intelligence対応端末のみ |
-| ローカルモデル2 | `AgentRunKitMLX`、互換性・メモリ評価後に追加 |
+| ローカルモデル1 | Apple Foundation Models `SystemLanguageModel`（`LanguageModelSession`）、Apple Intelligence対応端末のみ（ADR-037） |
+| ローカルモデル2 | mlx-swift-lm `MLXFoundationModels`（`MLXLanguageModel`）を Foundation Models 経由で。AgentRunKit は MLX なしのフォークを使う（ADR-036/037） |
 | 永続化 | SwiftDataまたはローカルSQLite（実装初期に一方を選定） |
 | 秘密情報 | iOS Keychain。ソース・設定ファイルへ直書き禁止 |
 | CI | GitHub ActionsのmacOS runnerでビルド／ユニットテスト |
