@@ -36,6 +36,7 @@ struct ChatView: View {
                 conversation: conversation,
                 repository: ConversationRepository(context: modelContext),
                 notes: JournalNoteStore(journal: journal),
+                journal: journal,
                 settings: settings,
                 broker: broker,
                 resolve: ChatSession.liveResolver(
@@ -62,6 +63,9 @@ private struct ChatContent: View {
 
     @State private var input = ""
     @FocusState private var inputFocused: Bool
+    @State private var speech = SpeechCapture()
+    @State private var speechMessage: String?
+    @State private var confirmInstall = false
 
     private var isRunning: Bool { session.isBusy }
 
@@ -112,6 +116,15 @@ private struct ChatContent: View {
             }
         }
         .safeAreaInset(edge: .bottom) { inputBar }
+        .task { await speech.refreshAvailability() }
+        .confirmationDialog(
+            "日本語の音声認識データをダウンロードしますか？（通信が発生します）",
+            isPresented: $confirmInstall, titleVisibility: .visible
+        ) {
+            Button("ダウンロード") { installAssets() }
+            Button("キャンセル", role: .cancel) {}
+        }
+        .onDisappear { stopRecording() }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -132,11 +145,11 @@ private struct ChatContent: View {
                 Text(ToolCapabilityTracker.limitedMessage).font(.caption).foregroundStyle(.orange)
             }
             if settings.choice == .claude {
-                Text("Claude選択中: 入力・直近の会話・保存済みメモと最近の日誌はAnthropicへ送信されます")
+                Text("Claude選択中: 入力・直近の会話・保存済みメモと、質問に関係する日誌・会議の内容はAnthropicへ送信されます")
                     .font(.caption).foregroundStyle(.orange)
             }
             if settings.choice == .mlxLocal {
-                Text("ダウンロードモデル（端末内・ツールなし）: 外部へ送信しません")
+                Text("ダウンロードモデル（端末内）: 外部へ送信しません")
                     .font(.caption).foregroundStyle(.secondary)
                 if needsModelDownload {
                     NavigationLink("設定でダウンロードする") { settingsView }
@@ -146,11 +159,14 @@ private struct ChatContent: View {
                     JournalModelStatusView(store: mlxStore, runtime: mlxRuntime, measurementLog: measurementLog)
                 }
             }
+            voiceStatus
             HStack(alignment: .bottom) {
+                micButton
                 TextField("メッセージ", text: $input, axis: .vertical)
                     .lineLimit(1...8)
                     .textFieldStyle(.roundedBorder)
                     .focused($inputFocused)
+                    .disabled(isRecordingBusy)
                 if isRunning {
                     Button("停止", role: .destructive) { session.stop() }
                         .buttonStyle(.borderedProminent)
@@ -159,12 +175,112 @@ private struct ChatContent: View {
                         .labelStyle(.iconOnly)
                         .accessibilityLabel("送信")
                         .font(.title)
-                        .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(isRecordingBusy || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
         .padding()
         .background(.bar)
+    }
+
+    // MARK: Voice input (same on-device transcription as the journal)
+
+    private var isRecordingBusy: Bool {
+        switch speech.state {
+        case .preparing, .recording, .finishing: true
+        case .idle, .failed: false
+        }
+    }
+
+    @ViewBuilder
+    private var voiceStatus: some View {
+        if let reason = speech.reason, !isRecordingBusy {
+            HStack {
+                Text(reason.userMessage).font(.caption).foregroundStyle(.secondary)
+                switch reason {
+                case .assetsNotInstalled, .languageAssetsNotInstalled:
+                    Button("音声データを入手") { confirmInstall = true }.font(.caption)
+                case .permissionDenied:
+                    Button("マイクと音声認識を許可") { Task { await speech.requestPermissions() } }.font(.caption)
+                case .moduleUnavailable, .japaneseUnsupported, .languageUnsupported:
+                    EmptyView()
+                }
+            }
+        }
+        if case let .failed(text) = speech.state {
+            Text(text).font(.caption).foregroundStyle(.red)
+        }
+        if let speechMessage {
+            Text(speechMessage).font(.caption).foregroundStyle(.red)
+        }
+        if isRecordingBusy {
+            // Final text dark, the tentative tail light.
+            Text("\(speech.finalText)\(Text(speech.volatileText).foregroundStyle(.secondary))")
+                .font(.callout)
+                .lineLimit(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var micButton: some View {
+        switch speech.state {
+        case .recording:
+            Button { stopRecording() } label: {
+                Image(systemName: "stop.circle.fill").font(.title)
+            }
+            .tint(.red)
+            .accessibilityLabel("音声入力を停止")
+        case .preparing, .finishing:
+            ProgressView().frame(width: 34, height: 34)
+                .accessibilityLabel("音声入力を準備中")
+        case .idle, .failed:
+            Button { startRecording() } label: {
+                Image(systemName: "mic.circle.fill").font(.title)
+            }
+            .disabled(speech.reason != nil || isRunning)
+            .accessibilityLabel("音声入力")
+            .accessibilityHint(speech.reason?.userMessage ?? "")
+        }
+    }
+
+    private func startRecording() {
+        inputFocused = false
+        speechMessage = nil
+        Task {
+            do {
+                try await speech.start()
+            } catch {
+                speechMessage = SpeechCapture.startFailedText
+            }
+        }
+    }
+
+    /// What was recognized goes into the field for editing; nothing is sent automatically.
+    private func stopRecording() {
+        guard isRecordingBusy else { return }
+        let wasRecording = speech.state == .recording
+        Task {
+            await speech.stop()
+            guard wasRecording, case .idle = speech.state else { return }  // a failure shows in `speech.state`
+            let merged = ChatVoiceInput.merge(existing: input, recognized: speech.finalText)
+            if merged == input {
+                speechMessage = ChatVoiceInput.nothingRecognizedText
+            } else {
+                input = merged
+            }
+        }
+    }
+
+    private func installAssets() {
+        Task {
+            do {
+                try await speech.installAssets()
+                speechMessage = nil
+            } catch {
+                speechMessage = SpeechCapture.installFailedText
+            }
+        }
     }
 
     private func send() {

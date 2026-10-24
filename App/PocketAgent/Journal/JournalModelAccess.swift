@@ -17,9 +17,7 @@ enum JournalModelAccess {
     }
 
     static func assistant(client: any LLMClient, backend: JournalBackend) -> JournalAssistant {
-        JournalAssistant(
-            client: client, calendar: journalCalendar,
-            contextCharacterBudget: JournalModelRule.contextCharacterBudget(for: backend))
+        JournalAssistant(client: client, calendar: journalCalendar)
     }
 
     /// Follows Settings: Apple when chosen and usable, otherwise the downloaded model. Never Claude.

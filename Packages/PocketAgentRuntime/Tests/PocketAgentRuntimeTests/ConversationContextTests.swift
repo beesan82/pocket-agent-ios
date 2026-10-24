@@ -8,8 +8,11 @@ struct ConversationContextTests {
     private func user(_ text: String) -> ChatTurn { ChatTurn(role: .user, text: text) }
     private func assistant(_ text: String) -> ChatTurn { ChatTurn(role: .assistant, text: text) }
 
-    @Test func systemPromptPointsToAskJournal() {
-        #expect(ConversationContext.systemPrompt.contains("日誌に聞く"))
+    // The 聞く tab is gone: chat answers from the journal itself and says when nothing is recorded.
+    @Test func systemPromptNoLongerPointsToAskJournal() {
+        #expect(!ConversationContext.systemPrompt.contains("日誌に聞く"))
+        #expect(ConversationContext.systemPrompt.contains(
+            "- 保存済みメモと日誌に答えが無いときは、記録が見つからないと答えてください。推測で作らないでください。"))
     }
 
     @Test func historyKeepsOrderAndRoles() {

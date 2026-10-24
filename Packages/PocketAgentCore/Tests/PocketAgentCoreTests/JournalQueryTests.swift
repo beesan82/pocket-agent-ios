@@ -101,6 +101,41 @@ struct JournalQueryTests {
         #expect(SearchTerms.fallback(question: "a 会議\u{3000}会議 予算!") == ["会議", "予算"])
     }
 
+    // Chat looks the journal up every turn without a model call: keep kanji / katakana / latin runs,
+    // drop hiragana runs (particles and endings).
+    @Test func keywordsDropParticlesAndQuestionWords() {
+        #expect(SearchTerms.keywords(question: "ポチの散歩はいつ？") == ["ポチ", "散歩"])
+        #expect(SearchTerms.keywords(question: "先週の会議の結論は？") == ["会議", "結論"])
+        #expect(SearchTerms.keywords(question: "うちの犬の名前はココだよ") == ["名前", "ココ"])
+    }
+
+    // Review 2026-10-24: a single kanji like 私 matches almost everything, so it is dropped when a
+    // longer term exists; date words are handled as the date range, not as terms.
+    @Test func keywordsDropSingleKanjiWhenLongerTermsExist() {
+        #expect(SearchTerms.keywords(question: "私の予定は？") == ["予定"])
+        #expect(SearchTerms.keywords(question: "犬") == ["犬"])
+    }
+
+    @Test func keywordsDropRelativeDateWords() {
+        #expect(SearchTerms.keywords(question: "今日の予定") == ["予定"])
+        #expect(SearchTerms.keywords(question: "昨日と一昨日と先月") == [])
+    }
+
+    @Test func keywordsOfAQuestionWordAloneAreEmpty() {
+        #expect(SearchTerms.keywords(question: "いつ？") == [])
+        #expect(SearchTerms.keywords(question: "何があった？") == [])
+    }
+
+    @Test func keywordsDedupeAndCap() {
+        #expect(SearchTerms.keywords(question: "歯医者 歯医者 予約") == ["歯医者", "予約"])
+        let many = "赤、青、黄、緑、紫、橙、茶、灰、白、黒"
+        #expect(SearchTerms.keywords(question: many).count == SearchTerms.maxTerms)
+    }
+
+    @Test func keywordsKeepLatinAndDigits() {
+        #expect(SearchTerms.keywords(question: "iPhoneの修理は10月?") == ["iPhone", "修理", "10月"])
+    }
+
     // MARK: retrieval
 
     @Test func dateRangeWithNoTermHitsUsesWholeRange() {

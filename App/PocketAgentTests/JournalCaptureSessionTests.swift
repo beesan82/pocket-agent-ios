@@ -44,9 +44,6 @@ struct FakeJournalAssistant: JournalAssisting {
     /// Chunks `summarize` yields; with `hangAfterChunks` the stream then never finishes.
     var summaryChunks: [String] = []
     var hangAfterChunks = false
-    var askEvidence: [PackedEntry] = []
-    var askUsedRecentFallback = false
-    var answerChunks: [String] = []
     /// When set, the stream (summary or answer) yields its chunks, stays open and reports here.
     var probe: StreamProbe?
     /// Meeting notes: chunks, then finish / fail / stay open. Every call is recorded in `notesCalls`.
@@ -79,18 +76,6 @@ struct FakeJournalAssistant: JournalAssisting {
             for chunk in chunks { continuation.yield(chunk) }
             if !hang && probe == nil { continuation.finish() }
         }
-    }
-
-    func ask(_ question: String, store: any JournalStore) async throws -> AskResult {
-        let chunks = answerChunks
-        let probe = probe
-        return AskResult(
-            evidence: askEvidence, usedRecentFallback: askUsedRecentFallback,
-            answer: AsyncThrowingStream { continuation in
-                probe?.attach(continuation)
-                for chunk in chunks { continuation.yield(chunk) }
-                if probe == nil { continuation.finish() }
-            })
     }
 }
 
