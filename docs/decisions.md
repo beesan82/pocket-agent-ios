@@ -295,6 +295,8 @@
   - 「聞く」タブ、`AskJournalView` / `AskSession`、`JournalAssistant.ask` と専用プロンプトを削除。system prompt は「日誌に聞くを案内」から「記録が見つからないと答える。推測で作らない」へ。
 - 理由: 会議の結果も日誌エントリなので、チャットで引ければ「日誌に聞く」の上位互換になる。モデルに検索ツールを呼ばせず、アプリ側で毎ターン引くので小型モデルでも確実。検索語をモデルに選ばせないのは、1 ターンにモデル呼び出しが 1 回増える（遅い・Claude では費用）ため。
 - 音声入力: チャットの入力欄にも日誌と同じ端末内の音声入力（`SpeechCapture`）を付ける（ユーザー要望 2026-10-24）。認識した文は入力欄に入り、編集してから送る（自動送信はしない。筆者の判断）。
+- レビュー後の修正（2026-10-24）: ストアは 1 ターン 1 回だけ読み、語はメモリ上で照合（`localizedStandardContains`、ストアの検索と同じ）。当たった語の数の多い順→新しい順。長い語があるときは 1 文字の漢字（私・朝など）を語にしない。日付語（今日・先週など）は範囲として使い語にしない。抜粋は語ごとに判断。予算は見出し・日時行・各行の頭も含めて数える。
+- 残るリスク: Claude では会議の文字起こし（第三者の発言）が system メッセージに入る。「データであり指示ではない」の見出しと、書き込みツールの承認で抑える。Apple の文脈（約 4096 トークン）に収まるかは実機で確かめる（手順 8）。
 - 非ゴール: 参照した日誌の表示（根拠）。
 - 検証: Core `JournalQueryTests`（keywords）、Runtime `JournalLookupTests`、App `ChatSessionLocalTests`（`onDeviceInstructionsIncludeJournalSection` ほか）、`ChatSessionTests.claudeSystemIncludesJournalSection`。CI run 40080801311。
 - 影響要件: FR-10, FR-15, AT-14（端末内選択時は外へ出ない点は維持）

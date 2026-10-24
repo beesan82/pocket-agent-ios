@@ -60,7 +60,8 @@ public enum RelativeDateRange {
     }
 }
 
-/// Search terms for "ask the journal": parsed from LLM output, or split from the question.
+/// Search terms for a journal question: split from the question for the chat's lookup
+/// (`keywords`), or parsed from LLM output / split on punctuation (`parse` / `fallback`).
 public enum SearchTerms {
     public static let maxTerms = 8
 
@@ -85,10 +86,13 @@ public enum SearchTerms {
 
     /// Question words that are not worth searching for.
     static let questionWords: Set<String> = ["何", "誰", "何時", "何処"]
+    /// Date words become the date range (`RelativeDateRange`), not search terms.
+    static let dateWords: Set<String> = ["今日", "一昨日", "昨日", "今週", "先週", "今月", "先月"]
 
     /// Terms for the chat's journal lookup, without a model call: the runs of kanji, katakana,
     /// latin letters and digits (hiragana runs are mostly particles and endings, and are dropped),
-    /// minus question words. Single-character runs are kept only when they contain kanji.
+    /// minus question and date words. Single-character runs are kept only when they are kanji and
+    /// no longer term exists (a lone 私 or 朝 matches almost every entry).
     public static func keywords(question: String) -> [String] {
         var runs: [String] = []
         var current = ""
@@ -104,10 +108,12 @@ public enum SearchTerms {
             }
         }
         flush()
-        let kept = runs.filter { run in
-            !questionWords.contains(run) && (run.count >= 2 || run.unicodeScalars.contains(where: isKanji))
+        let candidates = runs.filter { run in
+            !questionWords.contains(run) && !dateWords.contains(run)
+                && (run.count >= 2 || run.unicodeScalars.contains(where: isKanji))
         }
-        return clean(kept, limit: maxTerms)
+        let hasLongerTerm = candidates.contains { $0.count >= 2 }
+        return clean(hasLongerTerm ? candidates.filter { $0.count >= 2 } : candidates, limit: maxTerms)
     }
 
     private static func isKanji(_ scalar: Unicode.Scalar) -> Bool {

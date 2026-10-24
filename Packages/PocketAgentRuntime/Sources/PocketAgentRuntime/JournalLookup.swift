@@ -1,8 +1,9 @@
 import Foundation
 import PocketAgentCore
 
-/// How many journal characters a chat turn may carry (the memo section, folded turns and tool
-/// definitions share the same context, so on-device budgets are smaller than 日誌に聞く's were).
+/// How many characters the chat's journal section may take, including its header, date line and
+/// each line's "- [date] " prefix (the memo section, folded turns and tool definitions share the
+/// same context, so on-device budgets are smaller than 日誌に聞く's were).
 public struct JournalLookupBudget: Sendable, Equatable {
     public let maxTotalCharacters: Int
 
@@ -15,13 +16,18 @@ public struct JournalLookupBudget: Sendable, Equatable {
     public static let mlxLocal = JournalLookupBudget(maxTotalCharacters: 1500)
 }
 
-/// The chat's journal lookup (日誌に聞く merged into chat, 2026-10-24): the same two steps — a date
-/// range from the question, narrowed by its words — without a model call. Journal entries only
-/// (saved memos are in the memo section every turn). Nothing specific found → empty (the recent
-/// entries are already in the memo section).
+/// The chat's journal lookup (日誌に聞く merged into chat, 2026-10-24): a date range from the
+/// question, narrowed by its words, without a model call. Journal entries only (saved memos are in
+/// the memo section every turn). Nothing specific found → empty (the recent entries are already in
+/// the memo section). The store is read once per turn and the words are matched in memory, ranked
+/// by how many of them an entry contains, then newest first.
 public enum JournalLookup {
     public static let maxCharactersPerEntry = 300
-    /// Characters of transcript shown around a hit that only the transcript has.
+    /// "\n- [yyyy-MM-dd HH:mm] " before each entry in `ConversationContext.journalLookupSection`.
+    static let lineOverhead = 22
+    /// The header line, "\n" and "現在日時: yyyy-MM-dd HH:mm（曜）".
+    static var sectionOverhead: Int { ConversationContext.journalLookupHeader.count + 1 + 25 }
+    /// Characters of transcript shown around a hit that only the transcript has (150 in total).
     static let excerptBefore = 60
     static let excerptAfter = 90
 
@@ -32,26 +38,36 @@ public enum JournalLookup {
         let terms = SearchTerms.keywords(question: question)
         guard range != nil || !terms.isEmpty else { return [] }
 
-        var inRange: [JournalEntry]?
+        let candidates: [JournalEntry]
         if let range {
-            inRange = try await store.entries(in: range).filter(isJournal)
+            candidates = try await store.entries(in: range).filter(isJournal)
+        } else {
+            candidates = try await store.all().filter(isJournal)
         }
-        var hitsByTerm: [[JournalEntry]] = []
-        for term in terms {
-            let hits = try await store.search(term).filter(isJournal)
-            hitsByTerm.append(range.map { range in
-                hits.filter { $0.createdAt >= range.start && $0.createdAt < range.end }
-            } ?? hits)
+        let hits = candidates.compactMap { entry -> (entry: JournalEntry, score: Int)? in
+            let score = terms.filter { matches(entry, $0) }.count
+            return score > 0 ? (entry, score) : nil
         }
-        let selection = JournalRetrieval.select(inRange: inRange, hitsByTerm: hitsByTerm, recent: [])
-        guard !selection.usedRecentFallback else { return [] }
+        let chosen: [JournalEntry]
+        if hits.isEmpty {
+            // A date range with no word hits: the whole range; no range and no hits: nothing.
+            chosen = range == nil ? [] : newestFirst(candidates)
+        } else {
+            chosen = hits.enumerated().sorted { lhs, rhs in
+                if lhs.element.score != rhs.element.score { return lhs.element.score > rhs.element.score }
+                if lhs.element.entry.createdAt != rhs.element.entry.createdAt {
+                    return lhs.element.entry.createdAt > rhs.element.entry.createdAt
+                }
+                return lhs.offset < rhs.offset
+            }.map(\.element.entry)
+        }
 
         var packed: [PackedEntry] = []
-        var total = 0
-        for entry in selection.entries {
+        var total = sectionOverhead
+        for entry in chosen {
             let text = render(entry, terms: terms)
-            if total + text.count > budget.maxTotalCharacters { break }
-            total += text.count
+            if total + lineOverhead + text.count > budget.maxTotalCharacters { break }
+            total += lineOverhead + text.count
             packed.append(PackedEntry(entry: entry, text: text))
         }
         return packed
@@ -59,13 +75,30 @@ public enum JournalLookup {
 
     private static func isJournal(_ entry: JournalEntry) -> Bool { entry.origin == .journal }
 
-    /// One line: title, a transcript excerpt when only the transcript has a term, then the body.
+    /// Same matching as the stores' search (case- and width-insensitive) over body, title and transcript.
+    private static func matches(_ entry: JournalEntry, _ term: String) -> Bool {
+        entry.body.localizedStandardContains(term) || (entry.title?.localizedStandardContains(term) ?? false)
+            || (entry.transcript?.localizedStandardContains(term) ?? false)
+    }
+
+    private static func newestFirst(_ entries: [JournalEntry]) -> [JournalEntry] {
+        entries.enumerated().sorted { lhs, rhs in
+            lhs.element.createdAt != rhs.element.createdAt
+                ? lhs.element.createdAt > rhs.element.createdAt : lhs.offset < rhs.offset
+        }.map(\.element)
+    }
+
+    /// One line: title, a transcript excerpt for the words only the transcript has, then the body.
     static func render(_ entry: JournalEntry, terms: [String]) -> String {
         var parts: [String] = []
         let shown = (entry.title ?? "") + "\n" + entry.body
-        if let transcript = entry.transcript, !terms.contains(where: { shown.contains($0) }),
-           let excerpt = excerpt(of: transcript, around: terms) {
-            parts.append("（文字起こしより）…" + excerpt + "…")
+        if let transcript = entry.transcript {
+            let transcriptOnly = terms.filter {
+                !shown.localizedStandardContains($0) && transcript.localizedStandardContains($0)
+            }
+            if let excerpt = excerpt(of: transcript, around: transcriptOnly) {
+                parts.append("（文字起こしより）…" + excerpt + "…")
+            }
         }
         parts.append(entry.body)
         var text = flattened(parts.joined(separator: " "))
@@ -77,7 +110,8 @@ public enum JournalLookup {
     }
 
     private static func excerpt(of transcript: String, around terms: [String]) -> String? {
-        guard let hit = terms.compactMap({ transcript.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound })
+        guard let hit = terms.compactMap({ transcript.localizedStandardRange(of: $0) })
+            .min(by: { $0.lowerBound < $1.lowerBound })
         else { return nil }
         let start = transcript.index(hit.lowerBound, offsetBy: -excerptBefore, limitedBy: transcript.startIndex)
             ?? transcript.startIndex

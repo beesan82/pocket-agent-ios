@@ -73,7 +73,7 @@ struct SettingsView: View {
             } header: {
                 Text("ローカル（端末内）")
             } footer: {
-                Text("日誌タブは、Apple を選んでいて使える端末なら Apple、それ以外はダウンロードモデルを使います（Claude は使いません）。ダウンロードモデルとAppleは端末内で処理し、外部へ送信しません。")
+                Text("日誌タブの要約と会議の要点は、Apple を選んでいて使える端末なら Apple、それ以外はダウンロードモデルで作ります（Claude は使いません）。ダウンロードモデルとAppleは端末内で処理し、外部へ送信しません。チャットで Claude を選んでいるときは、質問に関係する日誌・会議の内容も Anthropic へ送られます。")
             }
 
             Section("検証") {
