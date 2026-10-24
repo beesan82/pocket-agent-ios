@@ -36,8 +36,10 @@ final class MeetingSession {
     private(set) var notesPhase: NotesPhase = .idle
     private(set) var startedAt: Date?
     private(set) var isForeground = true
-    /// Two languages (ja/en) for the next meeting; see `setBilingual`.
-    private(set) var bilingual = false
+    /// The meeting's languages (codes from `MeetingLanguage`): one, or two for a bilingual meeting.
+    /// See `setLanguages`.
+    private(set) var languages: [String] = ["ja"]
+    var bilingual: Bool { languages.count == 2 }
 
     /// Final text not yet reflected in the notes (a running update's batch excluded), counted on
     /// the Japanese side (an English utterance counts by its translation once it has one).
@@ -67,14 +69,14 @@ final class MeetingSession {
     static let maxTranslationAttempts = 3
     @ObservationIgnored private(set) var translationTask: Task<Void, Never>?
 
-    /// The capture for the current setting (the screen reads its availability and asks for permissions / assets).
-    var source: any TranscriptSource {
-        bilingual ? (bilingualSource ?? singleSource) : singleSource
-    }
-    @ObservationIgnored private let singleSource: any TranscriptSource
-    @ObservationIgnored private let bilingualSource: (any TranscriptSource)?
-    /// The running (or last) capture is a two-language one.
+    /// The capture for the current languages (the screen reads its availability and asks for permissions / assets).
+    private(set) var source: any TranscriptSource
+    /// Makes the capture for a list of language codes; each list's capture is made once and kept.
+    @ObservationIgnored private let makeSource: @MainActor ([String]) -> any TranscriptSource
+    @ObservationIgnored private var sources: [String: any TranscriptSource] = [:]
+    /// The running (or last) capture is a two-language one, with these languages.
     @ObservationIgnored private var captureIsBilingual = false
+    @ObservationIgnored private var captureLanguages: [String] = ["ja"]
     @ObservationIgnored private var arbiter = LanguageArbiter()
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     @ObservationIgnored private var laneVolatile: [String: String] = [:]
@@ -100,24 +102,55 @@ final class MeetingSession {
     @ObservationIgnored private var captureOffset: TimeInterval = 0
 
     init(
-        source: any TranscriptSource, bilingualSource: (any TranscriptSource)? = nil,
+        makeSource: @escaping @MainActor ([String]) -> any TranscriptSource,
         translator: (any Translating)? = nil, store: any JournalStore, assistant: (any JournalAssisting)?,
         now: @escaping @MainActor () -> Date = Date.init
     ) {
-        self.singleSource = source
-        self.bilingualSource = bilingualSource
+        self.makeSource = makeSource
+        let first = makeSource(["ja"])
+        self.source = first
+        self.sources = ["ja": first]
         self.translator = translator
         self.store = store
         self.assistant = assistant
         self.now = now
     }
 
-    /// Chooses one or two languages for the next meeting; ignored while a meeting is open.
-    func setBilingual(_ value: Bool) {
+    /// Tests: one capture for a single language, another for any pair.
+    convenience init(
+        source: any TranscriptSource, bilingualSource: (any TranscriptSource)? = nil,
+        translator: (any Translating)? = nil, store: any JournalStore, assistant: (any JournalAssisting)?,
+        now: @escaping @MainActor () -> Date = Date.init
+    ) {
+        self.init(
+            makeSource: { codes in codes.count >= 2 ? (bilingualSource ?? source) : source },
+            translator: translator, store: store, assistant: assistant, now: now)
+    }
+
+    /// Chooses the next meeting's languages (one, or two different ones); ignored while a meeting is open.
+    func setLanguages(_ codes: [String]) {
         switch state {
-        case .idle, .saved, .failed: bilingual = value && bilingualSource != nil
-        case .preparing, .recording, .paused, .finishing: break
+        case .idle, .saved, .failed: break
+        case .preparing, .recording, .paused, .finishing: return
         }
+        var chosen: [String] = []
+        for code in codes where !code.isEmpty && !chosen.contains(code) { chosen.append(code) }
+        chosen = Array(chosen.prefix(2))
+        if chosen.isEmpty { chosen = ["ja"] }
+        languages = chosen
+        let key = chosen.joined(separator: "+")
+        if let existing = sources[key] {
+            source = existing
+        } else {
+            let made = makeSource(chosen)
+            sources[key] = made
+            source = made
+        }
+    }
+
+    /// Japanese alone, or Japanese and English.
+    func setBilingual(_ value: Bool) {
+        setLanguages(value ? ["ja", "en"] : ["ja"])
     }
 
     // MARK: Recording
@@ -155,7 +188,8 @@ final class MeetingSession {
         captureGeneration += 1
         let generation = captureGeneration
         let captureStart = now()
-        captureIsBilingual = bilingual && bilingualSource != nil
+        captureLanguages = languages
+        captureIsBilingual = languages.count == 2
         do {
             let events = try await source.start()
             guard generation == captureGeneration else { return }
@@ -163,7 +197,7 @@ final class MeetingSession {
             state = .recording
             if captureIsBilingual {
                 // Each capture restarts its clock: a fresh arbiter, decided every half second.
-                arbiter = LanguageArbiter()
+                arbiter = LanguageArbiter(languages: captureLanguages)
                 tickTask?.cancel()
                 tickTask = Task { [weak self] in
                     while !Task.isCancelled {
@@ -192,7 +226,9 @@ final class MeetingSession {
             volatileText = text
         case let .final(segment):
             volatileText = ""
-            segments.append(TranscriptSegment(id: segment.id, offset: captureOffset + segment.offset, text: segment.text))
+            segments.append(TranscriptSegment(
+                id: segment.id, offset: captureOffset + segment.offset, text: segment.text,
+                language: captureLanguages.first ?? "ja"))
             beginAutoUpdateIfNeeded()
         case let .failed(text):
             drainArbiter()
@@ -291,15 +327,17 @@ final class MeetingSession {
     private func translateQueued(with translator: any Translating, generation: Int) async {
         while generation == translationGeneration, !translationQueue.isEmpty {
             let id = translationQueue.removeFirst()
-            guard let segment = segments.first(where: { $0.id == id }), segment.translation == nil else { continue }
+            guard let segment = segments.first(where: { $0.id == id }), segment.translation == nil,
+                  let target = captureLanguages.first(where: { $0 != segment.language })
+            else { continue }
             translatingID = id
             var translated = false
             do {
-                let output = try await translator.translate(segment.text, from: segment.language, to: segment.otherLanguage)
+                let output = try await translator.translate(segment.text, from: segment.language, to: target)
                 let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
                 if generation == translationGeneration, !trimmed.isEmpty,
                    let index = segments.firstIndex(where: { $0.id == id }) {
-                    segments[index] = segments[index].withTranslation(trimmed)
+                    segments[index] = segments[index].withTranslation(trimmed, language: target)
                     translated = true
                 }
             } catch {}
@@ -396,7 +434,9 @@ final class MeetingSession {
         var end = reflectedCount
         var used = 0
         for index in reflectedCount..<segments.count {
-            if segments[index].language == "en", isAwaitingTranslation(segments[index]) { break }
+            // Only a translation into Japanese changes what the notes read.
+            if captureLanguages.contains("ja"), segments[index].language != "ja",
+               isAwaitingTranslation(segments[index]) { break }
             let length = segments[index].japaneseSide.count
             if end > reflectedCount, used + length > budget { break }
             used += length
@@ -514,7 +554,7 @@ final class MeetingSession {
         translationAttempts = [:]
         translationsClosed = false
         captureIsBilingual = false
-        arbiter = LanguageArbiter()
+        arbiter = LanguageArbiter(languages: languages)
         laneVolatile = [:]
         lastLanguage = nil
         if !keepingAssistant {

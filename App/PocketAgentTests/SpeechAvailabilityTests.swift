@@ -21,26 +21,33 @@ struct SpeechAvailabilityTests {
                 == .permissionDenied)
     }
 
-    @Test func reasonOrderWithEnglish() {
+    private func status(_ code: String, _ name: String, supported: Bool = true, installed: Bool = true)
+        -> SpeechAvailability.LanguageStatus
+    {
+        SpeechAvailability.LanguageStatus(code: code, name: name, supported: supported, installed: installed)
+    }
+
+    @Test func reasonOrderWithSeveralLanguages() {
         #expect(
             SpeechAvailability.reason(
-                isAvailable: true, supportsJapanese: true, assetsInstalled: false, permissionGranted: false,
-                supportsEnglish: false, englishAssetsInstalled: false)
-                == .englishUnsupported)
+                isAvailable: true,
+                languages: [status("ja", "日本語", installed: false), status("zh", "中文", supported: false, installed: false)],
+                permissionGranted: false)
+                == .languageUnsupported("中文"))
         #expect(
             SpeechAvailability.reason(
-                isAvailable: true, supportsJapanese: true, assetsInstalled: false, permissionGranted: false,
-                supportsEnglish: true, englishAssetsInstalled: false)
+                isAvailable: true,
+                languages: [status("ja", "日本語", installed: false), status("en", "English", installed: false)],
+                permissionGranted: false)
                 == .assetsNotInstalled)
         #expect(
             SpeechAvailability.reason(
-                isAvailable: true, supportsJapanese: true, assetsInstalled: true, permissionGranted: false,
-                supportsEnglish: true, englishAssetsInstalled: false)
-                == .englishAssetsNotInstalled)
+                isAvailable: true, languages: [status("en", "English"), status("zh", "中文", installed: false)],
+                permissionGranted: false)
+                == .languageAssetsNotInstalled("中文"))
         #expect(
             SpeechAvailability.reason(
-                isAvailable: true, supportsJapanese: true, assetsInstalled: true, permissionGranted: true,
-                supportsEnglish: true, englishAssetsInstalled: true)
+                isAvailable: true, languages: [status("en", "English"), status("zh", "中文")], permissionGranted: true)
                 == nil)
     }
 
@@ -53,8 +60,8 @@ struct SpeechAvailabilityTests {
 
     @Test func messagesAreJapaneseAndDistinct() {
         let reasons: [SpeechUnavailableReason] = [
-            .moduleUnavailable, .japaneseUnsupported, .englishUnsupported, .assetsNotInstalled,
-            .englishAssetsNotInstalled, .permissionDenied,
+            .moduleUnavailable, .japaneseUnsupported, .languageUnsupported("中文"), .assetsNotInstalled,
+            .languageAssetsNotInstalled("中文"), .permissionDenied,
         ]
         #expect(Set(reasons.map(\.userMessage)).count == reasons.count)
         #expect(reasons.allSatisfy { !$0.userMessage.isEmpty })

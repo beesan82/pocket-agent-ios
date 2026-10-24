@@ -4,7 +4,7 @@ import Foundation
 /// (all in seconds on the capture's clock).
 public struct LaneCandidate: Sendable, Equatable, Identifiable {
     public let id: UUID
-    /// The recognizer's language: "ja" or "en".
+    /// The recognizer's language code ("ja", "en", "zh", see `MeetingLanguage`).
     public let language: String
     public let text: String
     /// Per-word confidence averaged by characters; nil when the recognizer reported none.
@@ -58,7 +58,36 @@ public enum ScriptGuess {
     }
 
     public static func language(of text: String) -> String {
-        japaneseRatio(text) >= 0.5 ? "ja" : "en"
+        language(of: text, among: ["ja", "en"])
+    }
+
+    /// The likeliest of `languages` from the script alone. Japanese and Chinese share kanji, so kana
+    /// decides: CJK text with kana is Japanese, CJK text without kana is Chinese (when Chinese is a
+    /// candidate). Anything else is English when English is a candidate.
+    public static func language(of text: String, among languages: [String]) -> String {
+        let candidates = languages.isEmpty ? ["ja", "en"] : languages
+        var kana = 0
+        var han = 0
+        var letters = 0
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x3040...0x30FF, 0x31F0...0x31FF, 0xFF66...0xFF9F:
+                kana += 1
+                letters += 1
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF:
+                han += 1
+                letters += 1
+            default:
+                if CharacterSet.letters.contains(scalar) { letters += 1 }
+            }
+        }
+        if letters > 0, Double(kana + han) / Double(letters) >= 0.5 {
+            if kana > 0, candidates.contains("ja") { return "ja" }
+            if candidates.contains("zh") { return "zh" }
+            if candidates.contains("ja") { return "ja" }
+        }
+        if candidates.contains("en") { return "en" }
+        return candidates.first { $0 != "ja" && $0 != "zh" } ?? candidates[0]
     }
 
     private static func isJapanese(_ scalar: Unicode.Scalar) -> Bool {
@@ -128,8 +157,12 @@ public struct LanguageArbiter: Sendable {
 
     private var groups: [Group] = []
     private var decided: [DecidedSpan] = []
+    /// The meeting's languages, in the user's order (for decisions from the script alone).
+    public let languages: [String]
 
-    public init() {}
+    public init(languages: [String] = ["ja", "en"]) {
+        self.languages = languages
+    }
 
     /// Adds a candidate; returns the decisions that became due by its arrival time (late drops included).
     public mutating func submit(_ candidate: LaneCandidate) -> [ArbiterDecision] {
@@ -194,18 +227,21 @@ public struct LanguageArbiter: Sendable {
             let left = scores[lhs].flatMap { $0 } ?? Self.neutralConfidence
             let right = scores[rhs].flatMap { $0 } ?? Self.neutralConfidence
             if left != right { return left < right }
-            return Self.tieBreak(lhs, rhs, byLanguage)
-        } ?? "ja"
+            return rhs == preferredByScript(byLanguage)  // "lhs < rhs" when rhs is preferred
+        } ?? byLanguage.keys.sorted().first ?? "ja"
         let accepted = Self.ordered(byLanguage[winner] ?? [])
         let rejected = Self.ordered(all.filter { $0.language != winner })
         return ArbiterDecision(language: winner, accepted: accepted, rejected: rejected, reason: .compared)
     }
 
-    /// Equal scores: the Japanese lane wins when its text really is Japanese script.
-    private static func tieBreak(_ lhs: String, _ rhs: String, _ byLanguage: [String: [LaneCandidate]]) -> Bool {
-        let jaText = (byLanguage["ja"] ?? []).map(\.text).joined()
-        let preferred = ScriptGuess.language(of: jaText) == "ja" ? "ja" : "en"
-        return rhs == preferred  // "lhs < rhs" when rhs is preferred, so `max` returns it
+    /// Equal scores: the first lane (in the meeting's order) whose own text looks like its language.
+    private func preferredByScript(_ byLanguage: [String: [LaneCandidate]]) -> String {
+        let order = languages.filter { byLanguage[$0] != nil } + byLanguage.keys.sorted().filter { !languages.contains($0) }
+        for language in order {
+            let text = (byLanguage[language] ?? []).map(\.text).joined()
+            if ScriptGuess.language(of: text, among: languages) == language { return language }
+        }
+        return order.first ?? "ja"
     }
 
     private func single(_ candidates: [LaneCandidate]) -> ArbiterDecision {
@@ -215,7 +251,7 @@ public struct LanguageArbiter: Sendable {
         if let score = Self.confidence(of: candidates) {
             accepted = score >= Self.floorConfidence
         } else {
-            accepted = ScriptGuess.language(of: candidates.map(\.text).joined()) == language
+            accepted = ScriptGuess.language(of: candidates.map(\.text).joined(), among: languages) == language
         }
         return accepted
             ? ArbiterDecision(language: language, accepted: ordered, rejected: [], reason: .single)

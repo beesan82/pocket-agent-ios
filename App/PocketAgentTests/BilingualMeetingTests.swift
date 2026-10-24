@@ -273,7 +273,57 @@ struct BilingualMeetingTests {
         await setup.session.start()
 
         setup.session.setBilingual(false)
+        setup.session.setLanguages(["ja", "zh"])
 
         #expect(setup.session.bilingual)
+        #expect(setup.session.languages == ["ja", "en"])
+    }
+
+    @Test func singleNonJapaneseLanguageTagsSegments() async throws {
+        let setup = make(bilingual: false)
+        setup.session.setLanguages(["en"])
+        await setup.session.start()
+        #expect(setup.single.startCount == 1)
+
+        setup.single.yield(.final(TranscriptSegment(offset: 1, text: "Hello everyone")))
+        await settle()
+
+        #expect(setup.session.segments.first?.language == "en")
+        #expect(setup.translator.calls.isEmpty)
+    }
+
+    @Test func pairWithoutJapaneseUsesOriginalsForNotes() async throws {
+        let assistant = FakeJournalAssistant(notesChunks: ["## 決まったこと\n- A\n## 宿題\n- B\n## 論点・未決\n- C"])
+        let setup = make(assistant: assistant)
+        setup.session.setLanguages(["en", "zh"])
+        await setup.session.start()
+        #expect(setup.bilingual.startCount == 1)
+        setup.bilingual.yield(candidate("en", "Thanks", confidence: 0.9, start: 1, end: 2, arrivedAt: 2.1))
+        await settle()
+        setup.bilingual.elapsed = 4
+        setup.session.tick()
+        await settle()
+        await setup.session.translationTask?.value
+
+        #expect(setup.session.segments.first?.translation == "zh:Thanks")
+        setup.session.updateNotesNow()
+        await setup.session.notesTask?.value
+        #expect(assistant.notesCalls.calls.first?.newText == "Thanks")
+    }
+
+    @Test func japaneseChinesePairTranslatesBothWays() async throws {
+        let setup = make()
+        setup.session.setLanguages(["ja", "zh"])
+        await setup.session.start()
+        setup.bilingual.yield(candidate("ja", "納期を延ばします", confidence: 0.9, start: 1, end: 2, arrivedAt: 2.1))
+        setup.bilingual.yield(candidate("zh", "好的", confidence: 0.9, start: 3, end: 4, arrivedAt: 4.1))
+        await settle()
+        setup.bilingual.elapsed = 6
+        setup.session.tick()
+        await settle()
+        await setup.session.translationTask?.value
+
+        #expect(setup.session.segments.map(\.translation) == ["zh:納期を延ばします", "ja:好的"])
+        #expect(setup.session.segments.last?.japaneseSide == "ja:好的")
     }
 }

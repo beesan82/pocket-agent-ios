@@ -76,15 +76,16 @@ final class SpeechCapture: TranscriptSource {
             supported.append(await SpeechTranscriber.supportedLocale(equivalentTo: locale))
         }
         transcriberLocales = zip(locales, supported).map { $1 ?? $0 }
-        let assets = locales.map { locale in installed.contains { Self.sameLanguage($0, locale) } }
+        let statuses = zip(locales, supported).map { locale, match in
+            let code = locale.language.languageCode?.identifier ?? locale.identifier
+            return SpeechAvailability.LanguageStatus(
+                code: code, name: MeetingLanguage.named(code)?.displayName ?? code,
+                supported: match != nil, installed: installed.contains { Self.sameLanguage($0, locale) })
+        }
         reason = SpeechAvailability.reason(
-            isAvailable: isAvailable,
-            supportsJapanese: supported.first.flatMap { $0 } != nil,
-            assetsInstalled: assets.first ?? false,
+            isAvailable: isAvailable, languages: statuses,
             permissionGranted: AVAudioApplication.shared.recordPermission == .granted
-                && SFSpeechRecognizer.authorizationStatus() == .authorized,
-            supportsEnglish: supported.count < 2 || supported[1] != nil,
-            englishAssetsInstalled: assets.count < 2 || assets[1])
+                && SFSpeechRecognizer.authorizationStatus() == .authorized)
     }
 
     /// Asks for microphone and speech recognition permission (only those not yet decided).

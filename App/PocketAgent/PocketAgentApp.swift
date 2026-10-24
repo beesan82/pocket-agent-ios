@@ -47,8 +47,11 @@ struct PocketAgentApp: App {
         _journal = State(initialValue: journal)
         _meeting = State(initialValue: journal.map {
             MeetingSession(
-                source: SpeechCapture(),
-                bilingualSource: SpeechCapture(locales: [Locale(identifier: "ja_JP"), SpeechCapture.english]),
+                makeSource: { codes in
+                    SpeechCapture(locales: codes.compactMap { code in
+                        MeetingLanguage.named(code).map { Locale(identifier: $0.localeIdentifier) }
+                    })
+                },
                 store: $0, assistant: nil)
         })
     }

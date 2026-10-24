@@ -190,6 +190,12 @@
 - 影響要件: FR-11, FR-14, 6.3
 - 状態: 採用（実機未検証）
 
+## ADR-039 会議の言語は「言語 1」「言語 2」の 2 つの選択で決め、中国語（普通話・簡体字）を加える
+- 決定: ユーザーの指示（2026-10-24「中国語も対象に追加したい」「組み合わせ選択できるようにするのがベター」「選択肢は 2 つの項目で選ぶ」）。言語の一覧は Core の `MeetingLanguage.all`（日本語 ja_JP・English en_US・中文 zh_CN、表示名と全文の印 (EN)/(ZH)）の 1 か所で、言語を足すときはここに 1 行足す。会議タブは「言語 1」（既定 日本語）と「言語 2」（なし＋言語 1 以外、既定 なし）。なしなら単一言語（日本語以外も可）。日本語と中国語は漢字を共有するため、信頼度がないときの判定は「かながあれば日本語、漢字だけなら中国語」（`ScriptGuess.language(of:among:)`、`LanguageArbiter(languages:)`）。訳文は訳した言語を持ち、要点は日本語の原文か日本語訳だけを日本語として読む。日本語を含まない組み合わせでは原文のまま要点のモデルに渡す（要点は日本語）。音声の可否理由は言語ごとに一般化（日本語は従来の文言）。旧「二言語」スイッチ ON は初回に 言語 2 = English へ移行。繁体字は対象外。
+- 検証: `MeetingTranscriptTests`（印・訳文の言語・表）、`LanguageArbiterTests.scriptGuessSeparatesJapaneseAndChinese` / `arbiterUsesItsLanguagesForScriptDecisions`、`SpeechAvailabilityTests.reasonOrderWithSeveralLanguages`、`BilingualMeetingTests`（English だけの会議、English・中文、日本語・中文の両方向翻訳、会議中の変更無視）。実機は未検証（zh-CN の音声認識と翻訳の対応、日中の判定精度）。
+- 影響要件: FR-11, 6.3
+- 状態: 採用（実機未検証）
+
 ## 未決定
 - 永続化: SwiftData を Phase 1 で採用（設計書）。
 - Bundle ID: `com.beesan82.pocketagent`（2026-10-18 決定、ユーザー承認）。Team ID はリポジトリに書かず、Codemagic の自動署名がプロファイルから設定する。
