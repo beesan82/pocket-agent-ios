@@ -15,9 +15,8 @@ struct JournalView: View {
     @State private var entries: [JournalEntry] = []
     @State private var loaded = false
     @State private var query = ""
-    @State private var input = ""
-    @State private var inputDraftID = UUID()
     @State private var confirmDiscardDraft = false
+    @State private var resumingDraft = false
     @State private var listError: String?
     /// Kept apart from `listError` so the reload after a failed delete does not hide it.
     @State private var deleteError: String?
@@ -92,12 +91,11 @@ struct JournalView: View {
         .safeAreaInset(edge: .bottom) { recorder }
         .task(id: TaskKey(query: query, token: reloadToken)) { await reload() }
         .task { await speech.refreshAvailability() }
-        .sheet(item: $capture, onDismiss: { input = ""; inputDraftID = UUID() }) { request in
+        .sheet(item: $capture, onDismiss: { drafts.pauseComposer() }) { request in
             JournalCaptureView(
                 request: request, journal: journal, settings: settings, availability: availability,
                 mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog
             ) {
-                if request.source == .text { input = "" }
                 reloadToken += 1
             }
         }
@@ -109,20 +107,9 @@ struct JournalView: View {
             Button("キャンセル", role: .cancel) {}
         }
         .onDisappear { stopRecordingOnLeave() }
-        .onChange(of: input) { _, value in
-            guard capture == nil, drafts.draft == nil || drafts.draft?.id == inputDraftID else { return }
-            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                if drafts.draft?.id == inputDraftID {
-                    do { try drafts.clear() } catch { /* The error is shown above. */ }
-                }
-                return
-            }
-            do { try drafts.save(JournalDraft(id: inputDraftID, source: .text, transcript: value)) }
-            catch { /* The draft error is shown above. */ }
-        }
         .confirmationDialog("下書きを破棄しますか？", isPresented: $confirmDiscardDraft, titleVisibility: .visible) {
             Button("破棄", role: .destructive) {
-                do { try drafts.clear(); input = ""; inputDraftID = UUID() }
+                do { try drafts.clear() }
                 catch { /* The draft error is shown above. */ }
             }
             Button("キャンセル", role: .cancel) {}
@@ -130,20 +117,21 @@ struct JournalView: View {
     }
 
     private var hasOtherDraft: Bool {
-        (drafts.draft != nil && drafts.draft?.id != inputDraftID)
-            || (drafts.draft == nil && drafts.errorMessage != nil)
+        drafts.hasOtherDraft || resumingDraft
     }
 
     private func resumeDraft(_ draft: JournalDraft) {
+        guard !resumingDraft, drafts.draft?.id == draft.id else { return }
+        resumingDraft = true
         Task {
+            defer { resumingDraft = false }
             do {
-                if try await journal.entry(id: draft.id) != nil {
-                    try drafts.clear()
+                if let current = try await drafts.resumeDraft(lookup: { try await journal.entry(id: $0) }) {
+                    capture = CaptureRequest(source: current.source, transcript: current.transcript,
+                        draft: current, resumesDraft: true)
+                } else {
                     reloadToken += 1
-                    return
                 }
-                capture = CaptureRequest(source: draft.source, transcript: draft.transcript,
-                    draft: draft, resumesDraft: true)
             } catch { listError = "下書きを開けませんでした。もう一度お試しください。" }
         }
     }
@@ -247,14 +235,15 @@ struct JournalView: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 recordButton
-                TextField("テキストで記録", text: $input, axis: .vertical)
+                TextField("テキストで記録", text: Binding(get: { drafts.composerText },
+                    set: { drafts.editComposer($0) }), axis: .vertical)
                     .lineLimit(1...4)
                     .focused($inputFocused)
                     .textFieldStyle(.roundedBorder)
                     .disabled(isRecordingBusy || hasOtherDraft)
                 Button("記録") { recordText() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isRecordingBusy || hasOtherDraft || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isRecordingBusy || hasOtherDraft || drafts.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding()
@@ -285,7 +274,7 @@ struct JournalView: View {
 
     private func recordText() {
         inputFocused = false
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = drafts.composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         capture = CaptureRequest(source: .text, transcript: text, draft: drafts.draft)
     }

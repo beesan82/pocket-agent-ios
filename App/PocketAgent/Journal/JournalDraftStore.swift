@@ -35,6 +35,9 @@ final class JournalDraftStore {
     static let clearFailedText = "下書きを削除できませんでした。もう一度お試しください。"
     private(set) var draft: JournalDraft?
     private(set) var errorMessage: String?
+    private(set) var composerText = ""
+    private var composerID = UUID()
+    @ObservationIgnored private var revision = 0
     @ObservationIgnored private let fileURL: URL
     @ObservationIgnored private let removeItem: (URL) throws -> Void
 
@@ -52,6 +55,7 @@ final class JournalDraftStore {
     }
 
     func save(_ draft: JournalDraft) throws {
+        revision += 1
         self.draft = draft
         do {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -79,6 +83,43 @@ final class JournalDraftStore {
         }
         draft = nil
         errorMessage = nil
+        revision += 1
+        pauseComposer()
+    }
+
+    var hasOtherDraft: Bool {
+        (draft != nil && draft?.id != composerID) || (draft == nil && errorMessage != nil)
+    }
+
+    /// The journal's text field is owned here so full reset clears both disk and UI.
+    func editComposer(_ text: String) {
+        guard !hasOtherDraft else { return }
+        composerText = text
+        do {
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if draft?.id == composerID { try clear() }
+            } else {
+                try save(JournalDraft(id: composerID, source: .text, transcript: text))
+            }
+        } catch { /* Persistence methods expose the failure for retry. */ }
+    }
+
+    /// Clears the visible composer when its capture sheet closes, keeping the resumable draft.
+    func pauseComposer() {
+        composerText = ""
+        composerID = UUID()
+    }
+
+    func resumeDraft(lookup: @MainActor (UUID) async throws -> JournalEntry?) async throws -> JournalDraft? {
+        guard let requested = draft else { return nil }
+        let requestedRevision = revision
+        let saved = try await lookup(requested.id)
+        guard !Task.isCancelled, requestedRevision == revision, draft == requested else { return nil }
+        if saved != nil {
+            try clear()
+            return nil
+        }
+        return requested
     }
 
     private static func isMissing(_ error: any Error) -> Bool {

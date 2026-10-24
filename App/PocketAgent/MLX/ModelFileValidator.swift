@@ -21,6 +21,7 @@ enum ModelFileValidator {
         }
 
         // A missing shard must not be hidden by another valid .safetensors file.
+        var indexedFiles = Set<String>()
         for index in files where index.lastPathComponent.hasSuffix(".safetensors.index.json") {
             guard let object = jsonObject(at: index),
                   let map = object["weight_map"] as? [String: String], !map.isEmpty
@@ -29,9 +30,32 @@ enum ModelFileValidator {
                 guard !file.contains("/"), !file.contains("\\"),
                       tensorsByFile[file]?.contains(tensor) == true
                 else { return false }
+                indexedFiles.insert(file)
             }
         }
-        return true
+        return numberedShardsAreComplete(weights, indexedFiles: indexedFiles)
+    }
+
+    private static func numberedShardsAreComplete(_ weights: [URL], indexedFiles: Set<String>) -> Bool {
+        guard let pattern = try? NSRegularExpression(pattern: #"^(.+)-([0-9]{5})-of-([0-9]{5})\.safetensors$"#)
+        else { return false }
+        var groups: [String: (total: Int, parts: Set<Int>)] = [:]
+        for url in weights {
+            let name = url.lastPathComponent
+            let nsName = name as NSString
+            guard let match = pattern.firstMatch(in: name, range: NSRange(location: 0, length: nsName.length))
+            else { continue }
+            let prefix = nsName.substring(with: match.range(at: 1))
+            guard let part = Int(nsName.substring(with: match.range(at: 2))),
+                  let total = Int(nsName.substring(with: match.range(at: 3))),
+                  total > 0, part > 0, part <= total, indexedFiles.contains(name)
+            else { return false }
+            var group = groups[prefix] ?? (total, [])
+            guard group.total == total else { return false }
+            group.parts.insert(part)
+            groups[prefix] = group
+        }
+        return groups.values.allSatisfy { $0.parts.count == $0.total }
     }
 
     private static func hasTokenizer(at directory: URL, config: [String: Any]) -> Bool {
