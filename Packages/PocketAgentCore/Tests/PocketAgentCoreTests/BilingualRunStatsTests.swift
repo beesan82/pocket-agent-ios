@@ -24,9 +24,15 @@ struct BilingualRunStatsTests {
 
         #expect(stats.groups == 3)
         #expect(stats.matches == 2)
-        #expect(abs(try #require(stats.jaConfidence) - (0.9 + 0.8 + 0.3) / 3) < 0.0001)
-        #expect(abs(try #require(stats.enConfidence) - (0.2 + 0.7 + 0.1) / 3) < 0.0001)
-        #expect(abs(try #require(stats.averageDelay) - (1 + 2 + 1) / 3) < 0.0001)
+        let ja: Double = try #require(stats.jaConfidence)
+        let en: Double = try #require(stats.enConfidence)
+        let delay: Double = try #require(stats.averageDelay)
+        let expectedJa: Double = 2.0 / 3.0
+        let expectedEn: Double = 1.0 / 3.0
+        let expectedDelay: Double = 4.0 / 3.0
+        #expect(abs(ja - expectedJa) < 0.0001)
+        #expect(abs(en - expectedEn) < 0.0001)
+        #expect(abs(delay - expectedDelay) < 0.0001)
         #expect(stats.lines == [
             "二言語 日本語 判定 2/3 一致",
             "信頼度 ja 0.67 / en 0.33",
