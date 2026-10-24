@@ -400,6 +400,47 @@ struct MeetingSessionTests {
         #expect(session.modelReady == false)
     }
 
+    @Test func finishUsesTheGeneratedTitle() async throws {
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出し: 納期と価格表の件\n", "納期を延ばす。"], notesChunks: [Self.notesA])
+        let (session, source, store) = make(assistant: assistant)
+        await session.start()
+        source.yield(.final(TranscriptSegment(offset: 1, text: "納期を延ばします")))
+        await settle()
+
+        await session.finish()
+
+        #expect(session.state == .saved)
+        #expect(try await store.all().first?.title == "納期と価格表の件")
+    }
+
+    @Test func titleFallsBackToDateWhenTheModelGivesNone() async throws {
+        let clock = TestClock()
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出しなしの本文だけ"], notesChunks: [Self.notesA])
+        let (session, source, store) = make(assistant: assistant, clock: clock)
+        await session.start()
+        source.yield(.final(TranscriptSegment(offset: 1, text: "発言")))
+        await settle()
+
+        await session.finish()
+
+        #expect(try await store.all().first?.title == MeetingTitle.make(start: clock.now))
+    }
+
+    @Test func titleTimesOut() async throws {
+        let clock = TestClock()
+        let assistant = FakeJournalAssistant(summaryChunks: ["見出"], hangAfterChunks: true, notesChunks: [Self.notesA])
+        let (session, source, store) = make(assistant: assistant, clock: clock)
+        session.titleTimeout = .milliseconds(200)
+        await session.start()
+        source.yield(.final(TranscriptSegment(offset: 1, text: "発言")))
+        await settle()
+
+        await session.finish()
+
+        #expect(session.state == .saved)
+        #expect(try await store.all().first?.title == MeetingTitle.make(start: clock.now))
+    }
+
     @Test func resetAfterSaveClearsEverything() async throws {
         let (session, source, _) = make()
         await session.start()

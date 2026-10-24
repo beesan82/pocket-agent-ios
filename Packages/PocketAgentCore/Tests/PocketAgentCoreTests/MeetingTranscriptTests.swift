@@ -96,6 +96,13 @@ struct MeetingTranscriptTests {
         #expect(MeetingNotesPolicy.isComplete("") == false)
     }
 
+    @Test func generatedTitleIsCleaned() {
+        #expect(MeetingTitle.cleaned("「納期と価格表の件」。") == "納期と価格表の件")
+        #expect(MeetingTitle.cleaned("  ") == nil)
+        #expect(MeetingTitle.cleaned(nil) == nil)
+        #expect(MeetingTitle.cleaned(String(repeating: "あ", count: 30))?.count == 20)
+    }
+
     @Test func titleUsesMonthDayHourMinute() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "Asia/Tokyo"))

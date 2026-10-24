@@ -106,4 +106,18 @@ public enum MeetingTitle {
         formatter.dateFormat = "M/d HH:mm"
         return "会議 " + formatter.string(from: start)
     }
+
+    public static let maxGeneratedLength = 20
+
+    /// A model-written headline, cleaned (quotes and a trailing period dropped, at most 20 characters);
+    /// nil when nothing usable is left, so the caller falls back to `make(start:)`.
+    public static func cleaned(_ generated: String?) -> String? {
+        guard var title = generated?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return nil }
+        let quotes: Set<Character> = ["「", "」", "『", "』", "\"", "“", "”", "'"]
+        title.removeAll { quotes.contains($0) }
+        while let last = title.last, "。.".contains(last) { title.removeLast() }
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        return String(title.prefix(maxGeneratedLength))
+    }
 }

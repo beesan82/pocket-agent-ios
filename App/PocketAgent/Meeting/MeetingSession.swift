@@ -506,6 +506,35 @@ final class MeetingSession {
         translationQueue = []
     }
 
+    /// How long 「終了」 waits for the model to write the title.
+    @ObservationIgnored var titleTimeout: Duration = .seconds(20)
+    /// The title made for this meeting (kept for 「もう一度保存」).
+    @ObservationIgnored private var savedTitle: String?
+
+    /// A short Japanese headline from the on-device model (the summary's 見出し), written from the
+    /// notes or else the transcript; nil without a model, in the background, on failure or timeout.
+    private func generateTitle() async -> String? {
+        guard let assistant, isForeground else { return nil }
+        let source = notes.isEmpty ? segments.map(\.japaneseSide).joined(separator: "\n") : notes
+        let input = String(source.prefix(1500)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else { return nil }
+        let stream = assistant.summarize(input)
+        let reader = Task { () throws -> String in
+            var raw = ""
+            // Iterated to the end: cancelling this task ends the stream and so the model call.
+            for try await chunk in stream { raw += chunk }
+            return raw
+        }
+        let timeout = titleTimeout
+        let watchdog = Task {
+            try? await Task.sleep(for: timeout)
+            reader.cancel()
+        }
+        defer { watchdog.cancel() }
+        guard let raw = try? await reader.value else { return nil }
+        return MeetingTitle.cleaned(SummaryParser.parse(raw).title)
+    }
+
     func retrySave() async {
         guard state == .failed(Self.saveFailedText) else { return }
         state = .finishing
@@ -518,7 +547,10 @@ final class MeetingSession {
             return
         }
         let transcript = MeetingTranscriptFormatter.text(segments)
-        let title = MeetingTitle.make(start: startedAt ?? now())
+        if savedTitle == nil {
+            savedTitle = await generateTitle() ?? MeetingTitle.make(start: startedAt ?? now())
+        }
+        let title = savedTitle ?? MeetingTitle.make(start: startedAt ?? now())
         let entry = notes.isEmpty
             ? NewJournalEntry(source: .voice, origin: .journal, body: transcript, title: title)
             : NewJournalEntry(source: .voice, origin: .journal, body: notes, transcript: transcript, title: title)
@@ -567,6 +599,7 @@ final class MeetingSession {
         draftNotes = ""
         notesPhase = .idle
         startedAt = nil
+        savedTitle = nil
         reflectedCount = 0
         updatingUpTo = nil
         lastUpdateStartedAt = nil
