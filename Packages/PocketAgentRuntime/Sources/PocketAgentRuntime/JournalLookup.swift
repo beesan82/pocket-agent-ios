@@ -32,7 +32,10 @@ public enum JournalLookup {
         let terms = SearchTerms.keywords(question: question)
         guard range != nil || !terms.isEmpty else { return [] }
 
-        let inRange = try await range.map { try await store.entries(in: $0).filter(isJournal) }
+        var inRange: [JournalEntry]?
+        if let range {
+            inRange = try await store.entries(in: range).filter(isJournal)
+        }
         var hitsByTerm: [[JournalEntry]] = []
         for term in terms {
             let hits = try await store.search(term).filter(isJournal)
