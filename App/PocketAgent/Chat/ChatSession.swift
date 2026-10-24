@@ -44,6 +44,8 @@ final class ChatSession {
     @ObservationIgnored private let conversation: ConversationRecord
     @ObservationIgnored private let repository: ConversationRepository
     @ObservationIgnored private let notes: any MemoryStore
+    /// Looked up every turn for entries related to the message (日誌に聞く merged into chat).
+    @ObservationIgnored private let journal: any JournalStore
     @ObservationIgnored private let settings: ModelSettings
     @ObservationIgnored private let resolve: ClientResolver
     @ObservationIgnored private let onDevice: any OnDeviceModelAccess
@@ -64,6 +66,7 @@ final class ChatSession {
         conversation: ConversationRecord,
         repository: ConversationRepository,
         notes: any MemoryStore,
+        journal: any JournalStore,
         settings: ModelSettings,
         broker: ApprovalBroker,
         resolve: @escaping ClientResolver,
@@ -73,6 +76,7 @@ final class ChatSession {
         self.conversation = conversation
         self.repository = repository
         self.notes = notes
+        self.journal = journal
         self.settings = settings
         self.resolve = resolve
         self.onDevice = onDevice
@@ -170,8 +174,7 @@ final class ChatSession {
         status = .running
         task = Task {
             // Memory is optional context: a read failure must not stop the answer.
-            let memory = (try? await notes.allMemory()) ?? []
-            let section = ConversationContext.memorySection(memory: memory, limit: .claude)
+            let section = await turnContext(for: message, limit: .claude, budget: .claude)
             let runner = AgentRunner<EmptyContext>(
                 client: client, tools: runnerTools,
                 systemPrompt: ConversationContext.claudeSystemPrompt(memorySection: section))
@@ -223,8 +226,8 @@ final class ChatSession {
                 }
             }
             // Memory is optional context: a read failure must not stop the answer.
-            let memory = (try? await notes.allMemory()) ?? []
-            let section = ConversationContext.memorySection(memory: memory, limit: .appleLocal)
+            let section = await turnContext(
+                for: message, limit: .appleLocal, budget: choice == .appleLocal ? .appleLocal : .mlxLocal)
             let runner = await onDevice.runner(for: choice)
             if Task.isCancelled {
                 // `stop()` already reported it; a later send may own the status by now.
@@ -276,6 +279,22 @@ final class ChatSession {
             let nativeTool = await recorder.firstTool
             await complete(reply, turn: TurnInfo(choice: choice, message: message, tools: tools, nativeTool: nativeTool))
         }
+    }
+
+    /// Saved memos and recent journal entries, plus the journal entries related to `message`.
+    /// When some are found they replace the "recent journal" part. Both are optional context:
+    /// a read failure must not stop the answer.
+    private func turnContext(
+        for message: String, limit: MemoryInjectionLimit, budget: JournalLookupBudget
+    ) async -> String? {
+        let memory = (try? await notes.allMemory()) ?? []
+        let now = Date()
+        let found = (try? await JournalLookup.find(
+            question: message, store: journal, now: now, calendar: JournalModelAccess.journalCalendar,
+            budget: budget)) ?? []
+        return ConversationContext.contextSections(
+            memory: ConversationContext.memorySection(memory: memory, limit: limit, includeJournal: found.isEmpty),
+            journal: ConversationContext.journalLookupSection(found, now: now))
     }
 
     private func fail(with reason: ModelUnavailableReason) {

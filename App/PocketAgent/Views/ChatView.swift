@@ -36,6 +36,7 @@ struct ChatView: View {
                 conversation: conversation,
                 repository: ConversationRepository(context: modelContext),
                 notes: JournalNoteStore(journal: journal),
+                journal: journal,
                 settings: settings,
                 broker: broker,
                 resolve: ChatSession.liveResolver(

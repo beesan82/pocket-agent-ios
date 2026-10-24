@@ -83,6 +83,47 @@ public enum SearchTerms {
         return clean(fragments, limit: nil)
     }
 
+    /// Question words that are not worth searching for.
+    static let questionWords: Set<String> = ["何", "誰", "何時", "何処"]
+
+    /// Terms for the chat's journal lookup, without a model call: the runs of kanji, katakana,
+    /// latin letters and digits (hiragana runs are mostly particles and endings, and are dropped),
+    /// minus question words. Single-character runs are kept only when they contain kanji.
+    public static func keywords(question: String) -> [String] {
+        var runs: [String] = []
+        var current = ""
+        func flush() {
+            if !current.isEmpty { runs.append(current) }
+            current = ""
+        }
+        for scalar in question.unicodeScalars {
+            if isKeywordScalar(scalar) {
+                current.unicodeScalars.append(scalar)
+            } else {
+                flush()
+            }
+        }
+        flush()
+        let kept = runs.filter { run in
+            !questionWords.contains(run) && (run.count >= 2 || run.unicodeScalars.contains(where: isKanji))
+        }
+        return clean(kept, limit: maxTerms)
+    }
+
+    private static func isKanji(_ scalar: Unicode.Scalar) -> Bool {
+        (0x4E00...0x9FFF).contains(scalar.value) || (0x3400...0x4DBF).contains(scalar.value)
+            || scalar.value == 0x3005 // 々
+    }
+
+    private static func isKeywordScalar(_ scalar: Unicode.Scalar) -> Bool {
+        let v = scalar.value
+        let katakana = (0x30A0...0x30FF).contains(v) && v != 0x30FB // ・ separates
+        let halfwidthKatakana = (0xFF66...0xFF9F).contains(v)
+        let latinOrDigit = (0x30...0x39).contains(v) || (0x41...0x5A).contains(v) || (0x61...0x7A).contains(v)
+            || (0xFF10...0xFF19).contains(v) || (0xFF21...0xFF3A).contains(v) || (0xFF41...0xFF5A).contains(v)
+        return isKanji(scalar) || katakana || halfwidthKatakana || latinOrDigit
+    }
+
     private static func clean(_ terms: [String], limit: Int?) -> [String] {
         var seen = Set<String>()
         var result: [String] = []

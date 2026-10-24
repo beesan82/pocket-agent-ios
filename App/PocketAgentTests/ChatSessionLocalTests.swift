@@ -200,7 +200,8 @@ struct ChatSessionLocalTests {
         session.send("先週の会議は？")
 
         #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
-        #expect(runner.calls.first?.instructions.contains(ConversationContext.journalLookupHeader) == false)
+        let call = try #require(runner.calls.first)
+        #expect(!call.instructions.contains(ConversationContext.journalLookupHeader))
     }
 
     // MARK: - Note tools
