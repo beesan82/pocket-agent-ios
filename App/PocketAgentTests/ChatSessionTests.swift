@@ -395,7 +395,7 @@ struct ChatSessionTests {
         #expect(session.status == .idle)
         let text = try #require(session.turns.last?.text)
         #expect(text.hasPrefix("日誌を直します。\n\n"))
-        #expect(text.contains("日誌タブ"))
+        #expect(text.contains("記録タブ"))
         #expect(try await journal.entry(id: entry.id)?.body == "日誌")
         #expect(try await journal.all().count == 1)
     }

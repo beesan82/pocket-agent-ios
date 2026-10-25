@@ -146,7 +146,7 @@ public enum NoteTools {
     private static func missingOrJournal(_ id: UUID, in store: any MemoryStore) async throws -> ToolResult {
         let isJournal = try await store.allMemory().contains { $0.id == id && $0.kind == .journal }
         return .error(isJournal
-            ? "日誌はチャットからは編集・削除できません。日誌タブで操作してください"
+            ? "日誌はチャットからは編集・削除できません。記録タブで操作してください"
             : "該当するメモがありません")
     }
 
