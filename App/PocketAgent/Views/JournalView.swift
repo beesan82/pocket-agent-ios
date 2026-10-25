@@ -52,26 +52,21 @@ struct JournalView: View {
         }
     }
 
+    private enum MeetingRoute: Hashable {
+        case start, prepare
+    }
+
     var body: some View {
         List {
             Section {
-                if meetingIsOpen || meetingNeedsSaveRetry {
-                    NavigationLink {
-                        meetingView(autoStart: false)
-                    } label: {
-                        Label(meetingNeedsSaveRetry ? "会議の保存を再試行" : "会議に戻る", systemImage: "waveform")
-                    }
-                    .disabled(isRecordingBusy)
-                } else {
-                    NavigationLink {
-                        meetingView(autoStart: true)
-                    } label: {
-                        Label("会議を開始", systemImage: "waveform")
-                    }
-                    .disabled(isRecordingBusy)
-                    NavigationLink("会議の準備・言語") {
-                        meetingView(autoStart: false)
-                    }
+                NavigationLink(value: meetingIsOpen || meetingNeedsSaveRetry ? MeetingRoute.prepare : .start) {
+                    Label(
+                        meetingNeedsSaveRetry ? "会議の保存を再試行" : meetingIsOpen ? "会議に戻る" : "会議を開始",
+                        systemImage: "waveform")
+                }
+                .disabled(isRecordingBusy)
+                if !meetingIsOpen && !meetingNeedsSaveRetry {
+                    NavigationLink("会議の準備・言語", value: MeetingRoute.prepare)
                     .disabled(isRecordingBusy)
                 }
             } header: {
@@ -117,6 +112,9 @@ struct JournalView: View {
             }
         }
         .navigationTitle("記録")
+        .navigationDestination(for: MeetingRoute.self) { route in
+            meetingView(autoStart: route == .start)
+        }
         .searchable(text: $query, prompt: "記録を検索")
         .scrollDismissesKeyboard(.interactively)
         .toolbar {
