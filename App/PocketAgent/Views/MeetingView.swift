@@ -6,6 +6,8 @@ import Translation
 /// 会議: live on-device transcription, notes rewritten on device as the meeting goes,
 /// one journal entry at the end. Nothing here leaves the device.
 struct MeetingView: View {
+    /// The record home can start a new meeting as soon as this screen opens.
+    var autoStart = false
     let meeting: MeetingSession
     let settings: ModelSettings
     let availability: any ModelAvailabilityChecking
@@ -24,6 +26,7 @@ struct MeetingView: View {
     @State private var translationInstalled = false
     @State private var translationConfig: TranslationSession.Configuration?
     @State private var translationMessage: String?
+    @State private var didAttemptAutoStart = false
 
     private var chosenLanguages: [String] {
         language2.isEmpty || language2 == language1 ? [language1] : [language1, language2]
@@ -68,6 +71,17 @@ struct MeetingView: View {
             meeting.setLanguages(chosenLanguages)
             await meeting.source.refreshAvailability()
             await refreshTranslation()
+            if autoStart && !didAttemptAutoStart {
+                didAttemptAutoStart = true
+                switch meeting.state {
+                case .idle, .saved:
+                    startMeeting()
+                case let .failed(message) where message != MeetingSession.saveFailedText:
+                    startMeeting()
+                case .preparing, .recording, .paused, .finishing, .failed:
+                    break
+                }
+            }
         }
         .onChange(of: language1) { _, value in
             if language2 == value { language2 = "" }

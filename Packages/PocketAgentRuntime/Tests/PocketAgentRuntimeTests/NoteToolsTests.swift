@@ -169,7 +169,7 @@ struct NoteToolsTests {
         let tools = NoteTools.make(store: JournalNoteStore(journal: journal), limit: .claude)
         for name in ["edit_note", "delete_note"] {
             let result = try await run(name, #"{"id":"\#(diary.id.uuidString)","text":"x"}"#, in: tools)
-            #expect(result.isError && result.content.contains("日誌タブ"), "\(name)")
+            #expect(result.isError && result.content.contains("記録タブ"), "\(name)")
         }
         #expect(try await journal.entry(id: diary.id)?.body == "日誌")
     }

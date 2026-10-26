@@ -1,10 +1,11 @@
 import PocketAgentCore
 import SwiftUI
 
-/// Home: the journal by day (newest first), search, and recording by voice or text.
+/// Record home: short notes and meetings, with one list of saved records.
 struct JournalView: View {
     @Environment(JournalDraftStore.self) private var drafts
     let journal: any JournalStore
+    let meeting: MeetingSession
     let settings: ModelSettings
     let availability: any ModelAvailabilityChecking
     let mlxStore: MLXModelStore
@@ -29,8 +30,48 @@ struct JournalView: View {
 
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    private var meetingIsOpen: Bool {
+        switch meeting.state {
+        case .preparing, .recording, .paused, .finishing: true
+        case .idle, .saved, .failed: false
+        }
+    }
+
+    private var meetingNeedsSaveRetry: Bool {
+        meeting.state == .failed(MeetingSession.saveFailedText)
+    }
+
+    private var meetingStatus: String? {
+        switch meeting.state {
+        case .preparing: "会議を準備中"
+        case .recording: "会議を録音中"
+        case .paused: "会議の録音が中断中"
+        case .finishing: "会議を保存中"
+        case let .failed(message) where message == MeetingSession.saveFailedText: "会議の保存に失敗"
+        case .idle, .saved, .failed: nil
+        }
+    }
+
+    private enum MeetingRoute: Hashable {
+        case start, prepare
+    }
+
     var body: some View {
         List {
+            Section {
+                NavigationLink(value: meetingIsOpen || meetingNeedsSaveRetry ? MeetingRoute.prepare : .start) {
+                    Label(
+                        meetingNeedsSaveRetry ? "会議の保存を再試行" : meetingIsOpen ? "会議に戻る" : "会議を開始",
+                        systemImage: "waveform")
+                }
+                .disabled(isRecordingBusy)
+                if !meetingIsOpen && !meetingNeedsSaveRetry {
+                    NavigationLink("会議の準備・言語", value: MeetingRoute.prepare)
+                    .disabled(isRecordingBusy)
+                }
+            } header: {
+                if let meetingStatus { Text(meetingStatus) }
+            }
             if let draft = drafts.draft {
                 Section("保存前の下書き") {
                     Text(String(draft.transcript.prefix(80))).lineLimit(3)
@@ -70,8 +111,11 @@ struct JournalView: View {
                 }
             }
         }
-        .navigationTitle("日誌")
-        .searchable(text: $query, prompt: "日誌を検索")
+        .navigationTitle("記録")
+        .navigationDestination(for: MeetingRoute.self) { route in
+            meetingView(autoStart: route == .start)
+        }
+        .searchable(text: $query, prompt: "記録を検索")
         .scrollDismissesKeyboard(.interactively)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -90,6 +134,12 @@ struct JournalView: View {
         }
         .safeAreaInset(edge: .bottom) { recorder }
         .task(id: TaskKey(query: query, token: reloadToken)) { await reload() }
+        .onAppear {
+            if loaded { reloadToken += 1 }
+        }
+        .onChange(of: meeting.state) { _, state in
+            if state == .saved { reloadToken += 1 }
+        }
         .task { await speech.refreshAvailability() }
         .sheet(item: $capture, onDismiss: { drafts.pauseComposer() }) { request in
             JournalCaptureView(
@@ -114,6 +164,13 @@ struct JournalView: View {
             }
             Button("キャンセル", role: .cancel) {}
         }
+    }
+
+    private func meetingView(autoStart: Bool) -> MeetingView {
+        MeetingView(
+            autoStart: autoStart, meeting: meeting, settings: settings, availability: availability,
+            mlxStore: mlxStore, mlxRuntime: mlxRuntime, measurementLog: measurementLog,
+            settingsView: settingsView)
     }
 
     private var hasOtherDraft: Bool {
@@ -266,9 +323,9 @@ struct JournalView: View {
             Button { startRecording() } label: {
                 Image(systemName: "mic.circle.fill").font(.title)
             }
-            .disabled(speech.reason != nil || drafts.draft != nil || drafts.errorMessage != nil)
+            .disabled(speech.reason != nil || drafts.draft != nil || drafts.errorMessage != nil || meetingIsOpen)
             .accessibilityLabel("録音")
-            .accessibilityHint(speech.reason?.userMessage ?? "")
+            .accessibilityHint(meetingIsOpen ? "会議中は短い音声入力を開始できません" : speech.reason?.userMessage ?? "")
         }
     }
 
@@ -378,7 +435,7 @@ struct JournalEntryDetailView: View {
                 }
             }
         }
-        .navigationTitle(entry.title ?? "日誌")
+        .navigationTitle(entry.title ?? "記録")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

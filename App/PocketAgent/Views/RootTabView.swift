@@ -1,7 +1,7 @@
 import PocketAgentCore
 import SwiftUI
 
-/// Root tabs: 日誌 (home), 会議, チャット (which also answers from the journal). Each tab has its own navigation stack.
+/// Root tabs: 記録 (including meetings) and チャット. Each tab has its own navigation stack.
 struct RootTabView: View {
     let settings: ModelSettings
     let credentials: any CredentialStore
@@ -20,18 +20,10 @@ struct RootTabView: View {
 
     var body: some View {
         TabView {
-            Tab("日誌", systemImage: "book") {
+            Tab("記録", systemImage: "book") {
                 NavigationStack {
                     JournalView(
-                        journal: journal, settings: settings, availability: availability,
-                        mlxStore: mlxStore, mlxRuntime: mlxRuntime,
-                        measurementLog: measurementLog, settingsView: settingsView)
-                }
-            }
-            Tab("会議", systemImage: "waveform") {
-                NavigationStack {
-                    MeetingView(
-                        meeting: meeting, settings: settings, availability: availability,
+                        journal: journal, meeting: meeting, settings: settings, availability: availability,
                         mlxStore: mlxStore, mlxRuntime: mlxRuntime,
                         measurementLog: measurementLog, settingsView: settingsView)
                 }

@@ -301,3 +301,9 @@
 - 検証: Core `JournalQueryTests`（keywords）、Runtime `JournalLookupTests`、App `ChatSessionLocalTests`（`onDeviceInstructionsIncludeJournalSection` ほか）、`ChatSessionTests.claudeSystemIncludesJournalSection`。CI run 40080801311。
 - 影響要件: FR-10, FR-15, AT-14（端末内選択時は外へ出ない点は維持）
 - 状態: 採用（実機未検証: docs/verification/2026-10-24-journal-in-chat.md）
+
+## ADR-041 日誌と会議の入口を「記録」タブに統合
+- 決定（ユーザー判断 2026-10-26）: 下部タブを「記録」「チャット」の二つにし、短い文字・音声メモと会議開始を「記録」から選ぶ。会議中は同じ場所から会議画面へ戻れる。保存済みの会議と日誌は従来どおり同じ一覧・検索に表示する。
+- 理由: 会議は保存後に日誌と同じ `JournalStore` に入り、チャットからも一緒に参照される。入口を一つにすると記録方法の選択が分かりやすい。一方、長時間の文字起こし・要点更新・二言語・中断再開には専用画面と `MeetingSession` を残す。
+- 制約: 既存データ形式を変えない。会議中にチャットへ移っても録音を続ける。会議の準備・言語の導線を残す。
+- 検証: `docs/verification/2026-10-26-record-tab-unification.md`。実機未検証。
