@@ -12,7 +12,8 @@ public struct JournalLookupBudget: Sendable, Equatable {
     }
 
     public static let claude = JournalLookupBudget(maxTotalCharacters: 6000)
-    public static let appleLocal = JournalLookupBudget(maxTotalCharacters: 800)
+    /// 800 (2026-10-24) held two entries at most, so the model saw nothing for older questions.
+    public static let appleLocal = JournalLookupBudget(maxTotalCharacters: 1200)
     public static let mlxLocal = JournalLookupBudget(maxTotalCharacters: 1500)
 }
 
