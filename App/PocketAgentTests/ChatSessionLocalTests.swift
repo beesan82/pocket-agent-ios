@@ -258,6 +258,23 @@ struct ChatSessionLocalTests {
         #expect(session.lastJournalReference == nil)
     }
 
+    @Test func newMessageClearsPreviousJournalReference() async throws {
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "台南ホテル"))
+        let runner = ScriptedTurnRunner([[.text("台南ホテルです")], [.text("こんにちは")]])
+        let session = makeSession(
+            try repository.create(choice: .mlxLocal), notes: JournalNoteStore(journal: journal),
+            onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("ホテルは？")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        #expect(session.lastJournalReference?.assistantTurnIndex == 1)
+
+        session.send("こんにちは")
+        #expect(session.lastJournalReference == nil)
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 4 })
+        #expect(session.lastJournalReference?.assistantTurnIndex == 3)
+    }
+
     @Test func lookupFailureStillAnswers() async throws {
         let runner = ScriptedTurnRunner([[.text("こんにちは")]])
         let session = makeSession(

@@ -13,6 +13,12 @@ typealias ClientResolver = @MainActor (ModelChoice) -> Result<any LLMClient, Mod
 @MainActor
 @Observable
 final class ChatSession {
+    struct JournalReference: Equatable {
+        let assistantTurnIndex: Int
+        /// The exact journal section supplied to the on-device model; nil means none was supplied.
+        let text: String?
+    }
+
     enum Status: Equatable {
         case idle
         /// The downloaded model is being loaded before it can answer.
@@ -29,6 +35,8 @@ final class ChatSession {
     private(set) var status = Status.idle
     /// The on-device model's reply so far; never saved until the reply completes.
     private(set) var streamingText = ""
+    /// Diagnostic for the most recent completed local answer only; not persisted with chat history.
+    private(set) var lastJournalReference: JournalReference?
     /// Why the last on-device send could not run (typed, so the screen can offer the fix);
     /// cleared by the next send.
     private(set) var lastFailureReason: ModelUnavailableReason?
@@ -108,6 +116,7 @@ final class ChatSession {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, !isBusy else { return }
         lastFailureReason = nil
+        lastJournalReference = nil
 
         let choice = settings.choice
         // Capability evidence is per model: switching models starts over.
@@ -174,10 +183,10 @@ final class ChatSession {
         status = .running
         task = Task {
             // Memory is optional context: a read failure must not stop the answer.
-            let section = await turnContext(for: message, limit: .claude, budget: .claude)
+            let context = await turnContext(for: message, limit: .claude, budget: .claude)
             let runner = AgentRunner<EmptyContext>(
                 client: client, tools: runnerTools,
-                systemPrompt: ConversationContext.claudeSystemPrompt(memorySection: section))
+                systemPrompt: ConversationContext.claudeSystemPrompt(memorySection: context.section))
 
             let outcome: Result<AgentRunOutcome, any Error>
             do {
@@ -189,7 +198,7 @@ final class ChatSession {
             }
             let nativeTool = await recorder.firstTool
             await self.finish(outcome, turn: TurnInfo(
-                choice: .claude, message: message, tools: tools, nativeTool: nativeTool))
+                choice: .claude, message: message, tools: tools, nativeTool: nativeTool, journalEvidence: nil))
         }
     }
 
@@ -226,7 +235,7 @@ final class ChatSession {
                 }
             }
             // Memory is optional context: a read failure must not stop the answer.
-            let section = await turnContext(
+            let context = await turnContext(
                 for: message, limit: .appleLocal, budget: choice == .appleLocal ? .appleLocal : .mlxLocal)
             let runner = await onDevice.runner(for: choice)
             if Task.isCancelled {
@@ -246,7 +255,7 @@ final class ChatSession {
             var reply = ""
             do {
                 let stream = runner.run(
-                    instructions: ConversationContext.onDeviceInstructions(memorySection: section),
+                    instructions: ConversationContext.onDeviceInstructions(memorySection: context.section),
                     prompt: LocalAgentPrompt.fold(previous: previousTurns, current: message),
                     tools: sessionTools)
                 // Each element is the reply so far; a later one may rewrite an earlier one.
@@ -277,24 +286,44 @@ final class ChatSession {
                 return
             }
             let nativeTool = await recorder.firstTool
-            await complete(reply, turn: TurnInfo(choice: choice, message: message, tools: tools, nativeTool: nativeTool))
+            await complete(reply, turn: TurnInfo(
+                choice: choice, message: message, tools: tools, nativeTool: nativeTool,
+                journalEvidence: context.journalEvidence))
         }
     }
 
     /// Saved memos and recent journal entries, plus the journal entries related to `message`.
     /// When some are found they replace the "recent journal" part. Both are optional context:
     /// a read failure must not stop the answer.
+    private struct TurnContext {
+        let section: String?
+        let journalEvidence: String?
+    }
+
     private func turnContext(
         for message: String, limit: MemoryInjectionLimit, budget: JournalLookupBudget
-    ) async -> String? {
+    ) async -> TurnContext {
         let memory = (try? await notes.allMemory()) ?? []
         let now = Date()
         let found = (try? await JournalLookup.find(
             question: message, store: journal, now: now, calendar: JournalModelAccess.journalCalendar,
             budget: budget)) ?? []
-        return ConversationContext.contextSections(
-            memory: ConversationContext.memorySection(memory: memory, limit: limit, includeJournal: found.isEmpty),
-            journal: ConversationContext.journalLookupSection(found, now: now))
+        let memorySection = ConversationContext.memorySection(
+            memory: memory, limit: limit, includeJournal: found.isEmpty)
+        let journalSection = ConversationContext.journalLookupSection(found, now: now)
+        return TurnContext(
+            section: ConversationContext.contextSections(memory: memorySection, journal: journalSection),
+            journalEvidence: journalSection ?? Self.recentJournalLines(in: memorySection))
+    }
+
+    /// Extract from the rendered memory section, after its total budget has dropped any excess
+    /// entries. Flattened entry bodies cannot introduce the newline-delimited heading.
+    private static func recentJournalLines(in memorySection: String?) -> String? {
+        guard let memorySection else { return nil }
+        let heading = ConversationContext.journalHeader + "\n"
+        if memorySection.hasPrefix(heading) { return memorySection }
+        guard let range = memorySection.range(of: "\n" + heading) else { return nil }
+        return String(memorySection[range.lowerBound...].dropFirst())
     }
 
     private func fail(with reason: ModelUnavailableReason) {
@@ -310,6 +339,7 @@ final class ChatSession {
         let tools: [RegisteredTool<EmptyContext>]
         /// The first tool the model called natively and that actually executed.
         let nativeTool: String?
+        let journalEvidence: String?
     }
 
     private enum ToolUse {
@@ -368,6 +398,10 @@ final class ChatSession {
             return
         }
         turns.append(reply)
+        if turn.choice.isLocal {
+            lastJournalReference = JournalReference(
+                assistantTurnIndex: turns.count - 1, text: turn.journalEvidence)
+        }
         // Only a completed, saved turn is logged and counted.
         record(use, turn: turn)
         status = .idle
