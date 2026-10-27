@@ -105,6 +105,28 @@ struct JournalLookupTests {
         #expect(text.count <= JournalLookup.maxCharactersPerEntry)
     }
 
+    @Test func summarizedHotelEntryStillShowsNameFromOriginal() async throws {
+        let store = try await store([
+            (date(2026, 10, 1, 10), journal(
+                "旅行中、ホテルに宿泊した。", transcript: "旅行中、ホテル白波に宿泊した。"))
+        ])
+        for budget in [JournalLookupBudget.appleLocal, .mlxLocal] {
+            let found = try await find("泊まったホテルの名前は？", store, budget: budget)
+            #expect(found.count == 1)
+            #expect(found.first?.text.contains("ホテル白波") == true)
+        }
+    }
+
+    // 2026-10-28: the question says 宿泊先, the entry says 宿泊: the kanji part finds it.
+    @Test func compoundWordFindsEntryWithItsPart() async throws {
+        let store = try await store([
+            (date(2026, 10, 1, 10), journal("旅行中、ホテル白波に宿泊した。")),
+            (date(2026, 10, 2, 7), journal("歯医者の予約"))
+        ])
+        let found = try await find("宿泊先はどこだった？", store, budget: .appleLocal)
+        #expect(found.map(\.entry.body) == ["旅行中、ホテル白波に宿泊した。"])
+    }
+
     @Test func packRespectsBudget() async throws {
         let long = String(repeating: "会議の記録。", count: 100)
         let store = try await store((1...10).map { (date(2026, 10, $0, 10), journal(long)) })
@@ -164,9 +186,10 @@ struct JournalLookupTests {
         #expect(section.count <= JournalLookupBudget.appleLocal.maxTotalCharacters)
     }
 
+    // 2026-10-28: 800 held two entries at most; Apple Intelligence answered "not found" for anything older.
     @Test func budgets() {
         #expect(JournalLookupBudget.claude.maxTotalCharacters == 6000)
-        #expect(JournalLookupBudget.appleLocal.maxTotalCharacters == 800)
+        #expect(JournalLookupBudget.appleLocal.maxTotalCharacters == 1200)
         #expect(JournalLookupBudget.mlxLocal.maxTotalCharacters == 1500)
     }
 

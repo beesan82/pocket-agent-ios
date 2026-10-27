@@ -62,7 +62,7 @@ public enum RelativeDateRange {
 
 /// Search terms for a journal question, split from the question for the chat's lookup.
 public enum SearchTerms {
-    public static let maxTerms = 8
+    public static let maxTerms = 12
 
     /// Question words that are not worth searching for.
     static let questionWords: Set<String> = ["何", "誰", "何時", "何処"]
@@ -72,7 +72,9 @@ public enum SearchTerms {
     /// Terms for the chat's journal lookup, without a model call: the runs of kanji, katakana,
     /// latin letters and digits (hiragana runs are mostly particles and endings, and are dropped),
     /// minus question and date words. Single-character runs are kept only when they are kanji and
-    /// no longer term exists (a lone 私 or 朝 matches almost every entry).
+    /// no longer term exists (a lone 私 or 朝 matches almost every entry). A run of three or more
+    /// kanji is followed by its two-character parts (宿泊先 → 宿泊, 泊先): a compound word in the
+    /// question rarely appears as is in an entry, while a part of it (ホテルに宿泊) often does.
     public static func keywords(question: String) -> [String] {
         var runs: [String] = []
         var current = ""
@@ -93,7 +95,19 @@ public enum SearchTerms {
                 && (run.count >= 2 || run.unicodeScalars.contains(where: isKanji))
         }
         let hasLongerTerm = candidates.contains { $0.count >= 2 }
-        return clean(hasLongerTerm ? candidates.filter { $0.count >= 2 } : candidates, limit: maxTerms)
+        let kept = hasLongerTerm ? candidates.filter { $0.count >= 2 } : candidates
+        return clean(kept.flatMap { [$0] + kanjiParts(of: $0) }, limit: maxTerms)
+    }
+
+    /// The two-character windows of a run made only of kanji, when it has three or more.
+    private static func kanjiParts(of run: String) -> [String] {
+        let scalars = Array(run.unicodeScalars)
+        guard scalars.count >= 3, scalars.allSatisfy(isKanji) else { return [] }
+        return (0 ..< scalars.count - 1).map { start in
+            var part = String.UnicodeScalarView()
+            part.append(contentsOf: scalars[start ..< start + 2])
+            return String(part)
+        }
     }
 
     private static func isKanji(_ scalar: Unicode.Scalar) -> Bool {

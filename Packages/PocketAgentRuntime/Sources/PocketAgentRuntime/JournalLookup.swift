@@ -12,7 +12,8 @@ public struct JournalLookupBudget: Sendable, Equatable {
     }
 
     public static let claude = JournalLookupBudget(maxTotalCharacters: 6000)
-    public static let appleLocal = JournalLookupBudget(maxTotalCharacters: 800)
+    /// 800 (2026-10-24) held two entries at most, so the model saw nothing for older questions.
+    public static let appleLocal = JournalLookupBudget(maxTotalCharacters: 1200)
     public static let mlxLocal = JournalLookupBudget(maxTotalCharacters: 1500)
 }
 
@@ -88,15 +89,12 @@ public enum JournalLookup {
         }.map(\.element)
     }
 
-    /// One line: title, a transcript excerpt for the words only the transcript has, then the body.
+    /// One line: title, a transcript excerpt around a matched word, then the body. The summary
+    /// can mention a category (for example, a hotel) while omitting the name in the original.
     static func render(_ entry: JournalEntry, terms: [String]) -> String {
         var parts: [String] = []
-        let shown = (entry.title ?? "") + "\n" + entry.body
         if let transcript = entry.transcript {
-            let transcriptOnly = terms.filter {
-                !shown.localizedStandardContains($0) && transcript.localizedStandardContains($0)
-            }
-            if let excerpt = excerpt(of: transcript, around: transcriptOnly) {
+            if let excerpt = excerpt(of: transcript, around: terms) {
                 parts.append("（文字起こしより）…" + excerpt + "…")
             }
         }

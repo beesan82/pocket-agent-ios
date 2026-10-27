@@ -85,7 +85,22 @@ private struct ChatContent: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(session.turns.enumerated()), id: \.offset) { index, turn in
-                        TurnRow(turn: turn).id(index)
+                        VStack(alignment: .leading, spacing: 6) {
+                            TurnRow(turn: turn)
+                            if let reference = session.lastJournalReference,
+                               reference.assistantTurnIndex == index {
+                                DisclosureGroup("自動参照した日誌") {
+                                    Text(reference.text ?? "自動参照した日誌はありません")
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .font(.footnote)
+                                .padding(10)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .id(index)
                     }
                     if !session.streamingText.isEmpty {
                         // Not saved yet, so no reply actions.

@@ -45,8 +45,8 @@ public struct MemoryInjectionLimit: Sendable {
         maxCharactersPerJournalEntry: 400, maxTotalCharacters: 12000)
     /// Sized for the small on-device model's context window.
     public static let appleLocal = MemoryInjectionLimit(
-        maxNotes: 10, maxCharactersPerNote: 100, maxJournalEntries: 5,
-        maxCharactersPerJournalEntry: 150, maxTotalCharacters: 1500)
+        maxNotes: 10, maxCharactersPerNote: 100, maxJournalEntries: 6,
+        maxCharactersPerJournalEntry: 200, maxTotalCharacters: 2000)
 }
 
 /// Builds the model-facing context from stored plain-text turns.
@@ -59,7 +59,7 @@ public enum ConversationContext {
     - メモの保存と削除は、必ずツールを使って行ってください。ツールを呼ばずに保存・削除したと答えてはいけません。
     - ユーザーが「覚えておいて」「覚えて」「メモして」「記録して」と頼んだら、必ず save_note ツールを呼んで保存してください。
     - \(memoryRule)
-    - 保存済みメモと日誌に答えが無いときは、記録が見つからないと答えてください。推測で作らないでください。
+    - 保存済みメモと日誌に答えが無いときは、見つからないと答える前に search_notes で別の言い方の語を探してください。それでも無ければ記録が見つからないと答えてください。推測で作らないでください。
     """
 
     /// Newest turns that fit the budget, oldest first. `turns` excludes the current user message.

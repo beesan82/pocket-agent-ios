@@ -85,13 +85,14 @@ public enum NoteTools {
             }, risk: .readOnly),
             RegisteredTool(NoteTool(
                 name: NoteToolName.search,
-                description: "保存済みのメモをキーワードで検索する。空白区切りの語をすべて含むメモを新しい順に返す。",
+                description: "保存済みのメモと日誌をキーワードで検索する。空白区切りの語をすべて含むものを新しい順に返し、"
+                    + "無ければいずれかの語を含むものを返す。",
                 schema: SearchNotesArgs.jsonSchema,
                 isReadOnly: true
             ) { arguments in
                 guard let args = decode(SearchNotesArgs.self, arguments) else { return invalidArguments }
                 return try await guarded("メモを検索できませんでした") {
-                    try encodeList(try await store.searchMemory(args.query), limit: limit)
+                    try encodeList(try await search(args.query, in: store), limit: limit)
                 }
             }, risk: .readOnly),
             RegisteredTool(NoteTool(
@@ -116,6 +117,33 @@ public enum NoteTools {
     // MARK: - Helpers
 
     private static let invalidArguments = ToolResult.error("引数が正しくありません")
+
+    /// Items with every word of `query` first; when there are none, items with any of its words
+    /// or of the parts of a compound word (`SearchTerms.keywords`), newest first. A small model's
+    /// query like "ホテル 名前" or "宿泊先" otherwise found nothing (2026-10-28).
+    private static func search(_ query: String, in store: any MemoryStore) async throws -> [MemoryItem] {
+        let strict = try await store.searchMemory(query)
+        guard strict.isEmpty else { return strict }
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        var terms: [String] = []
+        for term in words + SearchTerms.keywords(question: query) where !terms.contains(term) {
+            terms.append(term)
+        }
+        guard terms.count > 1 || terms.first != query.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return []
+        }
+        var seen = Set<UUID>()
+        var merged: [(item: MemoryItem, order: Int)] = []
+        for term in terms {
+            for item in try await store.searchMemory(term) where seen.insert(item.id).inserted {
+                merged.append((item, merged.count))
+            }
+        }
+        return merged.sorted { lhs, rhs in
+            lhs.item.createdAt != rhs.item.createdAt
+                ? lhs.item.createdAt > rhs.item.createdAt : lhs.order < rhs.order
+        }.map(\.item)
+    }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ data: Data) -> T? {
         try? JSONDecoder().decode(type, from: data)

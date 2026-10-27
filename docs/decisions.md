@@ -316,3 +316,16 @@
 - 検証: `MLXModelStoreTests.registryOffersQwen3_4BInstruct`（CI）。実機の速度・メモリ・ツール呼び出し成功率は未測定（`docs/phase2-mlx-eval.md` の測定 3）。
 - 影響要件: FR-14, FR-15, AT-15
 - 状態: 採用（候補のみ。既定への昇格は測定 3 の結果で判断）
+
+## ADR-043 日誌検索の再現率を上げる（漢字の部分語、Apple の予算、search_notes の OR フォールバック）
+- 背景（ユーザー報告 2026-10-28）: Apple Intelligence に日誌のことを聞くと、すぐ「該当する日誌がありません」と返る。原因はモデルではなくハーネス側: `SearchTerms.keywords` の語がそのまま本文に無いと `JournalLookup.find` が空になり、直近日誌 5 件×150 字しか渡らない上に、system prompt が「無ければ見つからないと答える」と命じていた。当たっても Apple の予算 800 字では 2 件しか入らない。`search_notes` は全語 AND なので小型モデルの検索語（「ホテル 名前」）も 0 件になる。
+- 決定:
+  - 語の拡張: 漢字だけの連なりが 3 文字以上なら、その直後に 2 文字の部分語を加える（宿泊先 → 宿泊・泊先。`Core/JournalQuery.swift`）。英数字や片仮名を含む連なり（10月、散歩コース）は変えない。上限 8 → 12 語。順位は従来どおり当たった語の数→新しい順。
+  - Apple の予算: 日誌検索 800 → 1200 字（300 字の項目が 3 件）、メモ節の直近日誌 5 件×150 字 → 6 件×200 字、メモ節合計 1500 → 2000 字。履歴の畳み込み（1500 字）と指示文を合わせて約 4096 トークンに収まるかは実機で確かめる。
+  - `search_notes`: 全語 AND で 0 件なら、各語と `SearchTerms.keywords` の部分語の OR で再検索し、新しい順に返す（AND の結果があればそれだけ）。説明文も「無ければいずれかの語を含むものを返す」に変更。
+  - system prompt: 「保存済みメモと日誌に答えが無いときは、見つからないと答える前に search_notes で別の言い方の語を探してください。それでも無ければ記録が見つからないと答えてください。推測で作らないでください。」（Claude・端末内で共通）。
+- 理由: ADR-040 でモデルに検索語を選ばせるのをやめた分の再現率を、モデル呼び出しを増やさずに取り戻す。ツールの OR フォールバックは、小型モデルが言い換えで検索したときの逃げ道。
+- 非ゴール: 形態素解析（NaturalLanguage）の導入、同義語辞書、スコアの重み付け。
+- 検証: Core `JournalQueryTests.keywordsAddKanjiPartsOfLongRuns`、Runtime `JournalLookupTests.compoundWordFindsEntryWithItsPart` / `budgets`、`ConversationContextTests.appleLocalLimitKeepsSixJournalEntriesOf200` / `systemPromptNoLongerPointsToAskJournal`、`NoteToolsTests.searchPrefersNotesWithEveryWord` / `searchFallsBackToAnyWordNewestFirst` / `searchFallsBackToPartsOfACompoundWord` / `searchWithNothingToFallBackOnIsEmpty`。RED: run 40534933894（一時ブランチ、新規 8 件だけ失敗）。GREEN: run 40536649265（Core 109 / Runtime 112 通過、シミュレータ・実機向けビルド成功）、run 40538604646（同ブランチの日誌の根拠表示の作業が乗った後の全 CI。App 単体テストを含め全ステップ成功）。
+- 影響要件: FR-10, FR-15
+- 状態: 採用（実機未検証）
