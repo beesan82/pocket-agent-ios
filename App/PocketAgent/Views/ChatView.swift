@@ -89,8 +89,8 @@ private struct ChatContent: View {
                             TurnRow(turn: turn)
                             if let reference = session.lastJournalReference,
                                reference.assistantTurnIndex == index {
-                                DisclosureGroup("参照した日誌") {
-                                    Text(reference.text ?? "参照した日誌はありません")
+                                DisclosureGroup("自動参照した日誌") {
+                                    Text(reference.text ?? "自動参照した日誌はありません")
                                         .textSelection(.enabled)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
