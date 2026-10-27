@@ -326,6 +326,6 @@
   - system prompt: 「保存済みメモと日誌に答えが無いときは、見つからないと答える前に search_notes で別の言い方の語を探してください。それでも無ければ記録が見つからないと答えてください。推測で作らないでください。」（Claude・端末内で共通）。
 - 理由: ADR-040 でモデルに検索語を選ばせるのをやめた分の再現率を、モデル呼び出しを増やさずに取り戻す。ツールの OR フォールバックは、小型モデルが言い換えで検索したときの逃げ道。
 - 非ゴール: 形態素解析（NaturalLanguage）の導入、同義語辞書、スコアの重み付け。
-- 検証: Core `JournalQueryTests.keywordsAddKanjiPartsOfLongRuns`、Runtime `JournalLookupTests.compoundWordFindsEntryWithItsPart` / `budgets`、`ConversationContextTests.appleLocalLimitKeepsSixJournalEntriesOf200` / `systemPromptNoLongerPointsToAskJournal`、`NoteToolsTests.searchPrefersNotesWithEveryWord` / `searchFallsBackToAnyWordNewestFirst` / `searchFallsBackToPartsOfACompoundWord` / `searchWithNothingToFallBackOnIsEmpty`。RED: run 40534933894（一時ブランチ、新規 8 件だけ失敗）。GREEN: run 40536649265（Core 109 / Runtime 112 通過、シミュレータ・実機向けビルド成功）、run 40538604646（同ブランチの ADR-043 相当の作業が乗った後の全 CI。App 単体テストを含め全ステップ成功）。
+- 検証: Core `JournalQueryTests.keywordsAddKanjiPartsOfLongRuns`、Runtime `JournalLookupTests.compoundWordFindsEntryWithItsPart` / `budgets`、`ConversationContextTests.appleLocalLimitKeepsSixJournalEntriesOf200` / `systemPromptNoLongerPointsToAskJournal`、`NoteToolsTests.searchPrefersNotesWithEveryWord` / `searchFallsBackToAnyWordNewestFirst` / `searchFallsBackToPartsOfACompoundWord` / `searchWithNothingToFallBackOnIsEmpty`。RED: run 40534933894（一時ブランチ、新規 8 件だけ失敗）。GREEN: run 40536649265（Core 109 / Runtime 112 通過、シミュレータ・実機向けビルド成功）、run 40538604646（同ブランチの日誌の根拠表示の作業が乗った後の全 CI。App 単体テストを含め全ステップ成功）。
 - 影響要件: FR-10, FR-15
 - 状態: 採用（実機未検証）
