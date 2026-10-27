@@ -191,6 +191,73 @@ struct ChatSessionLocalTests {
         #expect(runner.calls.first?.instructions == ConversationContext.onDeviceInstructions(memorySection: nil))
     }
 
+    @Test(arguments: [ModelChoice.appleLocal, .mlxLocal])
+    func completedAnswerShowsExactJournalInput(_ choice: ModelChoice) async throws {
+        settings.choice = choice
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "1日目のホテルは台南ホテル"))
+        let runner = ScriptedTurnRunner([[.text("ホテルです")]])
+        let session = makeSession(
+            try repository.create(choice: choice), notes: JournalNoteStore(journal: journal),
+            onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("1日目のホテルは？")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+
+        let reference = try #require(session.lastJournalReference)
+        let evidence = try #require(reference.text)
+        #expect(reference.assistantTurnIndex == 1)
+        #expect(evidence.contains("台南ホテル"))
+        #expect(evidence.hasPrefix(ConversationContext.journalLookupHeader))
+        let instructions = try #require(runner.calls.first?.instructions)
+        #expect(instructions.hasSuffix(evidence))
+    }
+
+    @Test func completedAnswerShowsRecentJournalFallback() async throws {
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "台南ホテル"))
+        let runner = ScriptedTurnRunner([[.text("こんにちは")]])
+        let session = makeSession(
+            try repository.create(choice: .mlxLocal), notes: JournalNoteStore(journal: journal),
+            onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("こんにちは")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+
+        let reference = try #require(session.lastJournalReference)
+        let evidence = try #require(reference.text)
+        #expect(evidence.hasPrefix(ConversationContext.journalHeader))
+        #expect(evidence.contains("台南ホテル"))
+        let instructions = try #require(runner.calls.first?.instructions)
+        #expect(instructions.hasSuffix(evidence))
+    }
+
+    @Test func completedAnswerWithNoJournalReportsNoReference() async throws {
+        let runner = ScriptedTurnRunner([[.text("こんにちは")]])
+        let session = makeSession(try repository.create(choice: .mlxLocal), onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("こんにちは")
+        #expect(try await waitUntil { session.status == .idle && session.turns.count == 2 })
+        #expect(session.lastJournalReference?.assistantTurnIndex == 1)
+        #expect(session.lastJournalReference?.text == nil)
+    }
+
+    @Test func journalReferenceOnlyFollowsCompletedCurrentAnswer() async throws {
+        _ = try await journal.add(NewJournalEntry(source: .text, origin: .journal, body: "台南ホテル"))
+        let runner = GatedTurnRunner()
+        let session = makeSession(
+            try repository.create(choice: .mlxLocal), notes: JournalNoteStore(journal: journal),
+            onDevice: FakeOnDeviceModel(runner: runner))
+
+        session.send("ホテルは？")
+        #expect(try await waitUntil { runner.calls.count == 1 })
+        #expect(session.lastJournalReference == nil)
+        runner.yield("ホテルです")
+        #expect(try await waitUntil { session.streamingText == "ホテルです" })
+        #expect(session.lastJournalReference == nil)
+        session.stop()
+        #expect(try await waitUntil { session.status == .failed(RunFailureText.stopped) })
+        #expect(session.lastJournalReference == nil)
+    }
+
     @Test func lookupFailureStillAnswers() async throws {
         let runner = ScriptedTurnRunner([[.text("こんにちは")]])
         let session = makeSession(
