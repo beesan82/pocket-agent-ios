@@ -139,6 +139,18 @@ struct MLXModelStoreTests {
         #expect(MLXModelRegistry.qwen3_1_7B.notes.contains("候補のみ"))
     }
 
+    @Test func registryOffersQwen3_4BInstruct() {
+        let model = MLXModelRegistry.qwen3_4B
+        #expect(model.id == "mlx-community/Qwen3-4B-Instruct-2507-4bit")
+        #expect(model.revision == "main")
+        // Hugging Face siblings total (checked 2026-10-28); DiskSpaceRule needs 1.5x of this.
+        #expect(model.approxBytes == 2_278_972_236)
+        #expect(model.license == "Apache-2.0")
+        #expect(MLXModelRegistry.all.last == model)
+        #expect(MLXModelRegistry.model(id: model.id) == model)
+        #expect(MLXModelRegistry.default == MLXModelRegistry.qwen25_1_5B)
+    }
+
     @Test func downloadRefusedWhenDiskTooSmall() {
         let downloader = FakeDownloader()
         let store = makeStore(downloader)

@@ -307,3 +307,12 @@
 - 理由: 会議は保存後に日誌と同じ `JournalStore` に入り、チャットからも一緒に参照される。入口を一つにすると記録方法の選択が分かりやすい。一方、長時間の文字起こし・要点更新・二言語・中断再開には専用画面と `MeetingSession` を残す。
 - 制約: 既存データ形式を変えない。会議中にチャットへ移っても録音を続ける。会議の準備・言語の導線を残す。
 - 検証: `docs/verification/2026-10-26-record-tab-unification.md`。実機未検証。
+
+## ADR-042 ダウンロードモデルの候補に Qwen3-4B-Instruct-2507（4bit）を追加
+- 決定（ユーザー判断 2026-10-28: クラウドは使えないので、ダウンロードモデルの上位候補が欲しい）: `MLXModelRegistry` に `mlx-community/Qwen3-4B-Instruct-2507-4bit`（約 2.28 GB、Apache-2.0）を非既定の候補として追加する。既定は ADR-024 のまま Qwen2.5 1.5B。
+- 理由: iPhone 15（RAM 6 GB）で載る上限は 4bit の 3〜4B 級。測定 2 では 1.5B 読込後に `os_proc_available_memory` が 2972 MB 残っており、4B 4bit（読込後 2.5〜2.6 GB の見込み）でも 1 GB 強の余裕がある。2507 の Instruct 版は thinking を持たないので、Qwen3 1.7B で保留した「thinking 無効化の確認」が不要。Qwen2.5 3B は Qwen Research License で商用配布に制限があるため退けた。
+- 見送り: Qwen2.5 7B（4.30 GB、重みだけで上限超え）、gemma-3-4b-it（3.44 GB、画像塔込みで重い）、Phi-4-mini / Llama 3.2 3B（日本語は Qwen 系より弱い傾向、ライセンスも Apache-2.0 でない）。サイズは Hugging Face API の siblings 合計（2026-10-28）。
+- 代償: 生成速度は 1.5B の半分程度（8〜15 tok/s の見込み）、ダウンロードは約 2.5 倍。`DiskSpaceRule` は 1.5 倍の空き（約 3.4 GB）を要求する。
+- 検証: `MLXModelStoreTests.registryOffersQwen3_4BInstruct`（CI）。実機の速度・メモリ・ツール呼び出し成功率は未測定（`docs/phase2-mlx-eval.md` の測定 3）。
+- 影響要件: FR-14, FR-15, AT-15
+- 状態: 採用（候補のみ。既定への昇格は測定 3 の結果で判断）

@@ -228,6 +228,7 @@
 - [ ] 承認待ちで停止すると何も保存されない
 - [ ] 日誌の要約・日誌に聞く・会議の要点が更新前と同等に動く
 - [ ] 機内モードで MLX を読み込める
+- [ ] Qwen3-4B-Instruct-2507（4bit、約 2.28 GB）のダウンロード・読み込み・要約・メモ保存を iPhone 15 で測る（`docs/phase2-mlx-eval.md` 測定 3、ADR-042）
 
 ## 二言語会議（段階 B、ADR-038）
 計画: `docs/superpowers/plans/2026-10-24-bilingual-meeting.md`
