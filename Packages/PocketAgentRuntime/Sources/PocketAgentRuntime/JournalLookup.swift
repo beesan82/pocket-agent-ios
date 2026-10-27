@@ -88,15 +88,12 @@ public enum JournalLookup {
         }.map(\.element)
     }
 
-    /// One line: title, a transcript excerpt for the words only the transcript has, then the body.
+    /// One line: title, a transcript excerpt around a matched word, then the body. The summary
+    /// can mention a category (for example, a hotel) while omitting the name in the original.
     static func render(_ entry: JournalEntry, terms: [String]) -> String {
         var parts: [String] = []
-        let shown = (entry.title ?? "") + "\n" + entry.body
         if let transcript = entry.transcript {
-            let transcriptOnly = terms.filter {
-                !shown.localizedStandardContains($0) && transcript.localizedStandardContains($0)
-            }
-            if let excerpt = excerpt(of: transcript, around: transcriptOnly) {
+            if let excerpt = excerpt(of: transcript, around: terms) {
                 parts.append("（文字起こしより）…" + excerpt + "…")
             }
         }
