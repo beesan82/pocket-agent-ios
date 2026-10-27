@@ -252,6 +252,57 @@ struct NoteToolsTests {
         #expect(try await store.all().count == 2)
     }
 
+    // 2026-10-28: a small model's query like "ホテル 名前" matched nothing because every word had
+    // to be in one note. Notes with all the words still come first and alone when there are any.
+    @Test func searchPrefersNotesWithEveryWord() async throws {
+        let store = InMemoryNoteStore()
+        _ = try await store.add("歯医者 15時")
+        _ = try await store.add("歯医者 予約")
+        let tools = NoteTools.make(store: store, limit: .appleLocal)
+
+        let result = try await run("search_notes", #"{"query":"歯医者 予約"}"#, in: tools)
+
+        let list = try JSONDecoder().decode(NoteListJSON.self, from: Data(result.content.utf8))
+        #expect(list.notes.map(\.text) == ["歯医者 予約"])
+    }
+
+    @Test func searchFallsBackToAnyWordNewestFirst() async throws {
+        let clock = TickingClock()
+        let store = InMemoryNoteStore(now: { clock.next() })
+        _ = try await store.add("歯医者 15時")
+        _ = try await store.add("牛乳を買う")
+        _ = try await store.add("散歩")
+        let tools = NoteTools.make(store: store, limit: .appleLocal)
+
+        let result = try await run("search_notes", #"{"query":"歯医者 牛乳"}"#, in: tools)
+
+        let list = try JSONDecoder().decode(NoteListJSON.self, from: Data(result.content.utf8))
+        #expect(list.notes.map(\.text) == ["牛乳を買う", "歯医者 15時"])
+    }
+
+    @Test func searchFallsBackToPartsOfACompoundWord() async throws {
+        let store = InMemoryNoteStore()
+        _ = try await store.add("ホテル白波に宿泊")
+        let tools = NoteTools.make(store: store, limit: .appleLocal)
+
+        let result = try await run("search_notes", #"{"query":"宿泊先"}"#, in: tools)
+
+        let list = try JSONDecoder().decode(NoteListJSON.self, from: Data(result.content.utf8))
+        #expect(list.notes.map(\.text) == ["ホテル白波に宿泊"])
+    }
+
+    @Test func searchWithNothingToFallBackOnIsEmpty() async throws {
+        let store = InMemoryNoteStore()
+        _ = try await store.add("牛乳を買う")
+        let tools = NoteTools.make(store: store, limit: .appleLocal)
+
+        let result = try await run("search_notes", #"{"query":"歯医者"}"#, in: tools)
+
+        let list = try JSONDecoder().decode(NoteListJSON.self, from: Data(result.content.utf8))
+        #expect(list.notes.isEmpty)
+        #expect(!result.isError)
+    }
+
     @Test func deleteAsksEveryTimeOnBothPaths() async throws {
         // Claude path
         let store = InMemoryNoteStore()
@@ -384,4 +435,16 @@ private struct FailingStore: MemoryStore {
     func deleteAll() async throws { throw Failure() }
     func allMemory() async throws -> [MemoryItem] { throw Failure() }
     func searchMemory(_: String) async throws -> [MemoryItem] { throw Failure() }
+}
+
+/// Each call is one second later than the last, so added notes get distinct creation dates.
+private final class TickingClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date(timeIntervalSince1970: 1_000_000)
+    func next() -> Date {
+        lock.withLock {
+            current = current.addingTimeInterval(1)
+            return current
+        }
+    }
 }

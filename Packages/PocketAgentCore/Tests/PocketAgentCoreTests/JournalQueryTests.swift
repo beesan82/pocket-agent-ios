@@ -101,9 +101,20 @@ struct JournalQueryTests {
     }
 
     @Test func keywordsDedupeAndCap() {
-        #expect(SearchTerms.keywords(question: "歯医者 歯医者 予約") == ["歯医者", "予約"])
-        let many = "赤、青、黄、緑、紫、橙、茶、灰、白、黒"
+        #expect(SearchTerms.keywords(question: "歯医者 歯医者 予約") == ["歯医者", "歯医", "医者", "予約"])
+        let many = "赤色、青色、黄色、緑色、紫色、橙色、茶色、灰色、白色、黒色、金色、銀色、桃色、水色"
         #expect(SearchTerms.keywords(question: many).count == SearchTerms.maxTerms)
+        #expect(SearchTerms.maxTerms == 12)
+    }
+
+    // 2026-10-28: a compound word in the question (宿泊先) rarely appears as is in a journal entry
+    // (ホテルに宿泊), so a kanji run of three or more also contributes its two-character parts,
+    // right after the run. Mixed runs (10月, 散歩コース) and katakana runs are left alone.
+    @Test func keywordsAddKanjiPartsOfLongRuns() {
+        #expect(SearchTerms.keywords(question: "宿泊先はどこだった？") == ["宿泊先", "宿泊", "泊先"])
+        #expect(SearchTerms.keywords(question: "東京出張の宿") == ["東京出張", "東京", "京出", "出張"])
+        #expect(SearchTerms.keywords(question: "散歩コースは？") == ["散歩コース"])
+        #expect(SearchTerms.keywords(question: "10月の予定") == ["10月", "予定"])
     }
 
     @Test func keywordsKeepLatinAndDigits() {

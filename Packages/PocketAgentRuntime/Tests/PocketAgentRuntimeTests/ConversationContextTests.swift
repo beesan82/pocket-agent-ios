@@ -12,7 +12,8 @@ struct ConversationContextTests {
     @Test func systemPromptNoLongerPointsToAskJournal() {
         #expect(!ConversationContext.systemPrompt.contains("日誌に聞く"))
         #expect(ConversationContext.systemPrompt.contains(
-            "- 保存済みメモと日誌に答えが無いときは、記録が見つからないと答えてください。推測で作らないでください。"))
+            "- 保存済みメモと日誌に答えが無いときは、見つからないと答える前に search_notes で別の言い方の語を探してください。"
+                + "それでも無ければ記録が見つからないと答えてください。推測で作らないでください。"))
     }
 
     @Test func historyKeepsOrderAndRoles() {
@@ -126,7 +127,22 @@ struct ConversationContextTests {
         #expect(lines.count == 12) // header + 10 + overflow line
         #expect(lines[1].hasSuffix("…") && lines[1].count == "- [2026-10-01] ".count + 100 + 1)
         #expect(lines.last == "…（他 2 件）")
-        #expect(text.count <= 1500)
+        #expect(text.count <= 2000)
+    }
+
+    // 2026-10-28: five 150-character entries lost the detail the question was about; six of 200 now.
+    @Test func appleLocalLimitKeepsSixJournalEntriesOf200() {
+        let limit = MemoryInjectionLimit.appleLocal
+        #expect(limit.maxJournalEntries == 6)
+        #expect(limit.maxCharactersPerJournalEntry == 200)
+        #expect(limit.maxTotalCharacters == 2000)
+        let entries = (0 ..< 8).map { diary(String(repeating: "い", count: 250) + "\($0)", title: nil, day: 8 - $0) }
+        let text = ConversationContext.memorySection(memory: entries, limit: limit, timeZone: utc)!
+        let lines = text.components(separatedBy: "\n")
+        #expect(lines.count == 8) // header + 6 + overflow line
+        #expect(lines[1].hasSuffix("…") && lines[1].count == "- [2026-10-08] ".count + 200 + 1)
+        #expect(lines.last == "…（他 2 件）")
+        #expect(text.count <= limit.maxTotalCharacters)
     }
 
     @Test func totalLimitDropsJournalBeforeNotes() {
