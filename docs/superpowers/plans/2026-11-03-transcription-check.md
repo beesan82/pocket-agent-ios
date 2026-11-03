@@ -51,10 +51,10 @@
 - Consume: `TranscriptionScorer.cer(reference:hypothesis:)` and `TranscriptionCheckPassage.allCases` from Task 1.
 - Produce: a "文字起こし精度チェック" section: passage picker (A/B/C with the text shown), record/stop, then CER and the raw transcript; appends `cer.journal passage=<label> cer=<value> ref=<n> hyp=<n>` to the measurement log.
 
-- [ ] **Step 1: Write failing tests** where the flow can be tested without audio (scoring a fixed transcript against a passage, log line format).
-- [ ] **Step 2: Verify RED** with an iOS CI run on the pull request.
-- [ ] **Step 3: Implement** the section, wiring `SpeechCapture` final results into the scorer.
-- [ ] **Step 4: Verify GREEN** with a full iOS CI run.
+- [x] **Step 1: Write failing tests** where the flow can be tested without audio (scoring a fixed transcript against a passage, log line format).
+- [x] **Step 2: Verify RED** with an iOS CI run on the pull request.
+- [x] **Step 3: Implement** the section, wiring `SpeechCapture` final results into the scorer.
+- [x] **Step 4: Verify GREEN** with a full iOS CI run.
 - [ ] **Step 5: Commit**, and add the real-device check (screen CER equals `tools/cer.py` on the same transcript) to `docs/phase0-checklist.md` under 実機で未検証.
 
 ### Task 3: Docs
