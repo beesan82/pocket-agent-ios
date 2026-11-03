@@ -60,6 +60,12 @@ struct MLXValidationView: View {
     @State private var speechTask: Task<Void, Never>?
     @State private var speechMessage: String?
     @State private var speechChars: Int?
+    @State private var checkSpeech = SpeechCapture()
+    @State private var checkPassage: TranscriptionCheckPassage = .readingAloud
+    @State private var checkTask: Task<Void, Never>?
+    @State private var checkResult: TranscriptionCheckResult?
+    @State private var checkTranscript: String?
+    @State private var checkMessage: String?
     @State private var copied = false
     @State private var confirmClear = false
     @State private var clearFailed = false
@@ -77,6 +83,7 @@ struct MLXValidationView: View {
             memorySection
             summarySection
             speechSection
+            transcriptionCheckSection
             BilingualGateSection(measurementLog: measurementLog)
         }
         .navigationTitle("MLX 検証")
@@ -86,6 +93,7 @@ struct MLXValidationView: View {
             hasToken = (try? tokenStore.readAPIKey())?.isEmpty == false
             await speech.refreshAvailability()
             measurementLog.append("音声可否: \(speech.reason?.userMessage ?? "利用可能")")
+            await checkSpeech.refreshAvailability()
         }
         .onChange(of: runtime.state) {
             refreshMemory()
@@ -97,6 +105,9 @@ struct MLXValidationView: View {
             speechTask?.cancel()
             speechTask = nil
             Task { await speech.stop() }
+            checkTask?.cancel()
+            checkTask = nil
+            Task { await checkSpeech.stop() }
         }
     }
 
@@ -539,6 +550,81 @@ struct MLXValidationView: View {
         speechChars = speech.finalText.count
         measurementLog.append("音声30秒テスト結果: 確定テキスト \(speech.finalText.count) 字")
         measurementLog.append("  > \(speech.finalText)")
+    }
+
+    // MARK: Transcription check
+
+    private var checkBusy: Bool {
+        switch checkSpeech.state {
+        case .preparing, .recording, .finishing: true
+        case .idle, .failed: false
+        }
+    }
+
+    private var transcriptionCheckSection: some View {
+        Section("文字起こし精度チェック") {
+            LabeledContent("可否", value: checkSpeech.reason?.userMessage ?? "利用可能")
+            if case let .failed(text) = checkSpeech.state {
+                Text(text).font(.footnote).foregroundStyle(.red)
+            }
+            Picker("読み上げ文", selection: $checkPassage) {
+                ForEach(TranscriptionCheckPassage.allCases, id: \.self) { passage in
+                    Text(passage.label).tag(passage)
+                }
+            }
+            .disabled(checkBusy)
+            Text(checkPassage.text).font(.footnote).foregroundStyle(.secondary)
+            if let checkMessage {
+                Text(checkMessage).font(.footnote).foregroundStyle(.red)
+            }
+            if checkBusy {
+                Button("停止", role: .destructive) { stopTranscriptionCheck() }
+            } else {
+                Button("録音") { startTranscriptionCheck() }
+            }
+            if checkSpeech.state == .recording, !checkSpeech.volatileText.isEmpty {
+                Text(checkSpeech.volatileText).foregroundStyle(.secondary)
+            }
+            if let checkResult {
+                LabeledContent("CER", value: String(format: "%.2f%%", checkResult.cer * 100))
+            }
+            if let checkTranscript {
+                Text(checkTranscript).textSelection(.enabled)
+            }
+        }
+        .buttonStyle(.bordered)
+    }
+
+    /// No auto-stop: the user reads the whole passage and presses 停止.
+    private func startTranscriptionCheck() {
+        checkMessage = nil
+        checkResult = nil
+        checkTranscript = nil
+        checkTask?.cancel()
+        checkTask = Task {
+            await checkSpeech.requestPermissions()
+            do {
+                try await checkSpeech.start()
+            } catch {
+                checkMessage = SpeechCapture.startFailedText
+            }
+            checkTask = nil
+        }
+    }
+
+    /// Logs only the CER line; the transcript stays on screen and no audio is saved (ADR-026).
+    private func stopTranscriptionCheck() {
+        checkTask?.cancel()
+        checkTask = nil
+        let passage = checkPassage
+        Task {
+            await checkSpeech.stop()
+            guard let result = TranscriptionCheck.evaluate(passage: passage, transcript: checkSpeech.finalText)
+            else { return }
+            checkResult = result
+            checkTranscript = checkSpeech.finalText
+            measurementLog.append(result.logLine)
+        }
     }
 
     private static func seconds(_ duration: Duration) -> Double {
