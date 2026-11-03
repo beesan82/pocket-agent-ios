@@ -1,6 +1,7 @@
 # Claude Code 開発ガイド — Pocket Agent (仮称)
 
 このリポジトリでは `AGENT_REQUIREMENTS.md` を唯一の要件基準文書とする。作業を始める前に全文を読むこと。
+作業の進め方（CI、TDD、失敗するコミットの扱い、共有ブランチでの commit と push）は `AGENTS.md` に従うこと。
 
 ## プロジェクトのゴール
 SwiftUI + AgentRunKitによるiPhone完結型エージェントを構築する。Claude Messages APIとApple Foundation Modelsの切替をMVPで実現し、LINEへのテキスト共有は人間の明示承認と最終送信を必須とする。MLX対応はPhase 2。
@@ -13,15 +14,10 @@ SwiftUI + AgentRunKitによるiPhone完結型エージェントを構築する�
 - 端末内推論を選んだときは、会話をクラウドへ無断送信しない。
 - SDKの使用例を推測で書かず、採用版のソースとCIビルドで確認する。
 
-## 開発順序
-1. リポジトリを確認し、`docs/architecture.md` と Phase 0 チェックリストを作る。
-2. Windows/Linuxで保守できるXcodeプロジェクト構成と、GitHub Actions macOS CIを用意。
-3. AgentRunKit v6.1.0候補版を固定してiOSビルドを通す。
-4. FakeLLMを作り、ツール・承認・停止・上限をテスト。
-5. Claude Messages APIとApple Foundation Modelsを別Adapterで実装し、1往復ずつ実機検証。
-6. チャットUI、Keychain、履歴、LINE共有フローを実装。
-7. テストAT-01～AT-14を確認し、Codemagic署名＋TestFlightを接続。
-8. Phase 2としてMLXの実機性能調査へ進む。
+## これまでの経緯と現在地
+Phase 0 の開発順序（CI、AgentRunKit 固定、FakeLLM、Claude と Apple の Adapter、チャット・Keychain・履歴・LINE 共有、Codemagic と TestFlight）は完了済み。
+Phase 2 の MLX（端末内日誌）も実装済みで、その後に会議モード、二言語会議、端末内モデルの Foundation Models 化、日誌のチャット統合、記録タブ統合を進めた。
+最新の決定は `docs/decisions.md`、実装済みと実機未検証の一覧は `docs/phase0-checklist.md` を見ること。
 
 ## 毎回の報告形式
 - 対応した要件ID
@@ -31,5 +27,7 @@ SwiftUI + AgentRunKitによるiPhone完結型エージェントを構築する�
 - 未確認事項／ブロッカー
 - 次の推奨作業
 
-## 最初の依頼
-`AGENT_REQUIREMENTS.md` を読んで、Phase 0の実装計画とディレクトリ構成案を作成してから、クラウドmacOS CIでビルドできる最小SwiftUIプロジェクトを構築せよ。未検証の機能を「完成」と報告しないこと。
+## 作業の始め方
+1. `AGENT_REQUIREMENTS.md`、`AGENTS.md`、`docs/architecture.md`、`docs/decisions.md` の最新の ADR、`docs/phase0-checklist.md` を読む。
+2. `git log --oneline -15` と `gh run list --workflow ios-ci.yml --limit 5` で現状を確かめる。
+3. 未検証の機能を「完成」と報告しないこと。
