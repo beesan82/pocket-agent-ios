@@ -35,11 +35,11 @@
 - Produce: `TranscriptionScorer.normalize(_:) -> String`, `TranscriptionScorer.editDistance(_:_:) -> Int`, `TranscriptionScorer.cer(reference:hypothesis:) -> Double?` (`nil` when the normalized reference is empty).
 - Produce: `TranscriptionCheckPassage: CaseIterable` with `label: String` and `text: String` for the three fixed passages.
 
-- [ ] **Step 1: Write failing tests** for the known pairs from the `tools/cer.py` verification (identical text scores 0; 「今日は良い天気です。」 vs 「今日は良い天気だ」 is 2/9; 「３千億円と、午前１０時。」 vs 「三千億円と午前10時」 is 1/10; punctuation-only differences score 0; a punctuation-only reference yields `nil`), plus three passages with non-trivial texts.
-- [ ] **Step 2: Verify RED** with an iOS CI run on the pull request at a test-only commit; expect the new tests to fail because the scorer does not exist yet.
-- [ ] **Step 3: Implement** `TranscriptionScorer` and `TranscriptionCheckPassage` in Core (Foundation only).
-- [ ] **Step 4: Verify GREEN** with a full iOS CI run; expect package tests, both builds and simulator tests to pass.
-- [ ] **Step 5: Commit** the tested scorer.
+- [x] **Step 1: Write failing tests** for the known pairs from the `tools/cer.py` verification (identical text scores 0; 「今日は良い天気です。」 vs 「今日は良い天気だ」 is 2/9; 「３千億円と、午前１０時。」 vs 「三千億円と午前10時」 is 1/10; punctuation-only differences score 0; a punctuation-only reference yields `nil`), plus three passages with non-trivial texts.
+- [x] **Step 2: Verify RED** with an iOS CI run on the pull request at a test-only commit; expect the new tests to fail because the scorer does not exist yet.
+- [x] **Step 3: Implement** `TranscriptionScorer` and `TranscriptionCheckPassage` in Core (Foundation only).
+- [x] **Step 4: Verify GREEN** with a full iOS CI run; expect package tests, both builds and simulator tests to pass.
+- [x] **Step 5: Commit** the tested scorer.
 
 ### Task 2: Verification section in the app
 
