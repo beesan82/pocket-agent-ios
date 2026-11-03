@@ -44,7 +44,12 @@ targets:
     type: application
     platform: iOS
     sources:
-      - App/PocketAgent
+      - path: App/PocketAgent
+        excludes:
+          - "Speech/CheckAudio/**"
+      # Synthesized check audio (base64 text, ADR-044) ships as a resource, not as code.
+      - path: App/PocketAgent/Speech/CheckAudio
+        buildPhase: resources
     # Keys Xcode cannot generate from INFOPLIST_KEY_* settings (UIBackgroundModes is not one of them;
     # the generated plist silently lacked it). The generated keys above are merged into this file.
     info:
