@@ -266,3 +266,16 @@
 - [ ] 保存した会議の見出しが内容に合っていること
 - [ ] 会議の文字起こし精度が日誌より悪い件: 机に置いた距離と、音声セッションの測定モード（雑音除去なし）が原因候補。同じ文章を同じ距離で日誌と会議で読み比べて切り分ける
 
+
+## 文字起こし精度チェックの自動化（ADR-044）
+設計: docs/superpowers/specs/2026-11-04-transcription-auto-check-design.md / 計画: docs/superpowers/plans/2026-11-04-transcription-auto-check.md
+
+### 実装済み（CI で自動テスト合格）
+- [x] 固定文 A〜C の合成音声（VOICEVOX）の base64 同梱と、実行時の WAV 復元
+- [x] ファイルのバッファを日誌経路と同一設定の SpeechAnalyzer へ投入する自動チェックと、`src=synth` 付きの cer.journal 行
+
+### 実機で未検証（iPhone 15、手順: docs/verification/2026-11-04-transcription-auto-check.md）
+- [ ] 自動チェックで A〜C の CER と認識テキストが出ること
+- [ ] 測定ログに `src=synth` 付きの行が残り、本文が含まれないこと
+- [ ] 機内モードで完走すること／認識資産が未導入のときの導入またはエラー表示
+- [ ] 手動の読み上げチェックが従来どおり動き、ログ行に印が付かないこと

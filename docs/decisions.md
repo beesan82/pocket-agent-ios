@@ -329,3 +329,16 @@
 - 検証: Core `JournalQueryTests.keywordsAddKanjiPartsOfLongRuns`、Runtime `JournalLookupTests.compoundWordFindsEntryWithItsPart` / `budgets`、`ConversationContextTests.appleLocalLimitKeepsSixJournalEntriesOf200` / `systemPromptNoLongerPointsToAskJournal`、`NoteToolsTests.searchPrefersNotesWithEveryWord` / `searchFallsBackToAnyWordNewestFirst` / `searchFallsBackToPartsOfACompoundWord` / `searchWithNothingToFallBackOnIsEmpty`。RED: run 40534933894（一時ブランチ、新規 8 件だけ失敗）。GREEN: run 40536649265（Core 109 / Runtime 112 通過、シミュレータ・実機向けビルド成功）、run 40538604646（同ブランチの日誌の根拠表示の作業が乗った後の全 CI。App 単体テストを含め全ステップ成功）。
 - 影響要件: FR-10, FR-15
 - 状態: 採用（実機未検証）
+
+## ADR-044 文字起こし精度チェックに合成音声の自動チェックを追加（実声の物差しとは分ける）
+- 決定:
+  - 固定文 A〜C の合成音声（VOICEVOX ずんだもん ノーマル、speaker 3、speedScale 1.0。正解文は `TranscriptionCheckPassage` から機械的に取り出して合成する）を 16kHz モノラル WAV とし、base64 テキストとして `App/PocketAgent/Speech/CheckAudio/` に同梱する。実行時にキャッシュへ WAV として復元する。WAV をそのまま置かないのは、リポジトリへの取り込み経路（GitHub コネクタ）がバイナリを運べないため。
+  - 自動チェックはマイクを使わず、復元したファイルの音声バッファを `SpeechAnalyzer` へ直接投入する。`SpeechTranscriber` の設定は日誌経路と同一にする（ロケールは `supportedLocale(equivalentTo:)` で解決し、`preset: .progressiveTranscription`。変換先は `SpeechAnalyzer.bestAvailableAudioFormat`）。認識資産が未導入なら、ボタン押下を起点に `AssetInventory` 経由で導入を試みる。
+  - 採点は `TranscriptionCheck.evaluate` に source を足して共用し、合成音声の結果はログ行の末尾に `src=synth` を付ける。実声（手動）の行は従来どおり無印。測定ログには件数と CER のみ（ADR-026 を継続）。
+  - 検証画面の精度チェック節に「自動チェック」ボタンを置き、A→B→C を順に実行して各 CER と認識テキスト（画面表示のみ）を出す。手動の読み上げモードは残し、同時には走らせない。
+  - 同梱するのは合成した固定文の音声だけ。実音声は入れない。
+- 理由: 手動チェックは読み手の人手と読み方のぶれが入り、「測りたいときにすぐ測る」ことができない。音源を固定した自動チェックがあれば、エンジン差し替えや整文の前後比較を再現性のある数字で回せる。
+- 物差しの性質: 合成音声は明瞭で雑音がなく、CER は実声より楽に出る。合成音声の数字は回帰の物差しであり、実利用の精度そのものではない。実声のベースライン（`docs/verification/2026-11-03-transcription-accuracy-baseline.md` の手動測定）は引き続き正で、置き換えない。比較表では `src=synth` の有無で系列を分ける。
+- 検証: App `TranscriptionAutoCheckTests`（文と素材の対応付け、同梱素材の存在、復元した WAV の妥当性）、`TranscriptionCheckTests`（`src=synth` 付きログ行の形式）。`SpeechAnalyzer` の実認識は実機のみ（手順: `docs/verification/2026-11-04-transcription-auto-check.md`）。
+- 影響要件: なし（検証機能の追加。保存方針は ADR-026 のまま）
+- 状態: 採用（実機未検証）
