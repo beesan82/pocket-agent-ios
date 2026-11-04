@@ -71,6 +71,8 @@ struct MLXValidationView: View {
     @State private var autoResults: [TranscriptionCheckPassage: TranscriptionCheckResult] = [:]
     @State private var autoTranscripts: [TranscriptionCheckPassage: String] = [:]
     @State private var autoErrors: [TranscriptionCheckPassage: String] = [:]
+    @State private var autoExperiment = false
+    @State private var autoExperimentOutcomes: [TranscriptionCheckPassage: TranscriptionExperimentOutcome] = [:]
     @State private var copied = false
     @State private var confirmClear = false
     @State private var clearFailed = false
@@ -604,6 +606,12 @@ struct MLXValidationView: View {
                 Button("自動チェック") { runAutoCheck() }
                     .disabled(checkBusy)
             }
+            Toggle("実験1 代替候補の選び直し", isOn: $autoExperiment)
+                .disabled(checkBusy || autoRunningPassage != nil)
+            if autoExperiment {
+                Text("ON のとき下の CER とテキストは選び直し適用後の値。実験OFF の CER・用語エラー数・候補ヒット数を並べて表示し、測定ログには両方の行（ON は alt=on 付き）を残す。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             ForEach(TranscriptionCheckPassage.allCases, id: \.self) { passage in
                 if let result = autoResults[passage] {
                     LabeledContent("\(passage.label) CER", value: String(format: "%.2f%%", result.cer * 100))
@@ -613,6 +621,11 @@ struct MLXValidationView: View {
                 }
                 if let transcript = autoTranscripts[passage] {
                     Text(transcript).font(.footnote).textSelection(.enabled)
+                }
+                if let outcome = autoExperimentOutcomes[passage] {
+                    LabeledContent("\(passage.label) 実験OFF CER", value: String(format: "%.2f%%", outcome.offResult.cer * 100))
+                    LabeledContent("\(passage.label) 用語エラー", value: "OFF \(outcome.offTermErrorCount) → ON \(outcome.onTermErrorCount)")
+                    LabeledContent("\(passage.label) 候補ヒット", value: "\(outcome.candidateTargetHits)")
                 }
             }
         }
@@ -653,23 +666,42 @@ struct MLXValidationView: View {
 
     /// Runs the bundled synthesized passages (A→B→C) through the same recognizer settings
     /// and logs each score with a `src=synth` marker; the transcripts stay on screen (ADR-044).
+    /// With the Experiment 1 switch on, each passage is recognized with the composed
+    /// options instead and scored both ways (the standard line and the `alt=on` line
+    /// are both logged, counts and CER only — ADR-026); the switch is the one
+    /// sanctioned divergence from the live-path configuration, and it is visible here.
     private func runAutoCheck() {
         autoTask?.cancel()
         autoResults = [:]
         autoTranscripts = [:]
         autoErrors = [:]
+        autoExperimentOutcomes = [:]
         let checker = TranscriptionAutoChecker()
+        let experiment = autoExperiment
         autoTask = Task {
             for passage in TranscriptionCheckPassage.allCases {
                 autoRunningPassage = passage
                 do {
-                    let transcript = try await checker.transcribe(passage: passage)
-                    autoTranscripts[passage] = transcript
-                    if let result = TranscriptionCheck.evaluate(passage: passage, transcript: transcript, source: .synth) {
-                        autoResults[passage] = result
-                        measurementLog.append(result.logLine)
+                    if experiment {
+                        let segments = try await checker.transcribeSegments(passage: passage, alternatives: true)
+                        if let outcome = TranscriptionExperiment.evaluate(passage: passage, segments: segments) {
+                            autoExperimentOutcomes[passage] = outcome
+                            autoResults[passage] = outcome.onResult
+                            autoTranscripts[passage] = outcome.onTranscript
+                            measurementLog.append(outcome.offLogLine)
+                            measurementLog.append(outcome.onLogLine)
+                        } else {
+                            autoErrors[passage] = "採点できませんでした。"
+                        }
                     } else {
-                        autoErrors[passage] = "採点できませんでした。"
+                        let transcript = try await checker.transcribe(passage: passage)
+                        autoTranscripts[passage] = transcript
+                        if let result = TranscriptionCheck.evaluate(passage: passage, transcript: transcript, source: .synth) {
+                            autoResults[passage] = result
+                            measurementLog.append(result.logLine)
+                        } else {
+                            autoErrors[passage] = "採点できませんでした。"
+                        }
                     }
                 } catch let error as TranscriptionAutoCheckError {
                     autoErrors[passage] = error.userMessage

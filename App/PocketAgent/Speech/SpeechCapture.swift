@@ -462,7 +462,7 @@ private final class AudioPipeline: @unchecked Sendable {
                 ? SpeechTranscriber(
                     locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults],
                     attributeOptions: [.audioTimeRange, .transcriptionConfidence])
-                : SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
+                : ProgressiveTranscriber.makeStandard(locale: locale)
             return Lane(language: locale.language.languageCode?.identifier ?? "ja", transcriber: transcriber)
         }
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: lanes.map { $0.transcriber }) else {
