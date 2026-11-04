@@ -63,5 +63,5 @@
 - Modify: `docs/verification/2026-11-03-transcription-accuracy-baseline.md`
 - Modify: `docs/phase0-checklist.md`
 
-- [ ] **Step 1:** Make the in-app check the primary procedure in the baseline doc; keep the script flow as the cross-check.
-- [ ] **Step 2:** Register the baseline measurement (journal path, passages A–C) in the checklist's 実機で未検証 with the in-app procedure.
+- [x] **Step 1:** Make the in-app check the primary procedure in the baseline doc; keep the script flow as the cross-check.（2026-11-04: 主手順はアプリ内自動チェック＝ADR-044 に発展。手動読み上げは補助手順、スクリプト手順はクロスチェックとして残した）
+- [x] **Step 2:** Register the baseline measurement (journal path, passages A–C) in the checklist's 実機で未検証 with the in-app procedure.（2026-11-04: 自動チェックの実機確認を登録し、手動読み上げ＝日誌経路のベースライン測定は未実施のまま実機で未検証に明記）
