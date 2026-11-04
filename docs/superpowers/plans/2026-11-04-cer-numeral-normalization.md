@@ -15,4 +15,4 @@
 - [x] Step 2: `tools/cer.py` に同じ変換を実装し、`--keep-numerals`（旧系列の再現用）を足す。`tools/test_cer.py` を作り、Swift テストと同一の変換ケースを流して両実装の一致を確かめる。
 - [x] Step 3: 初回ベースラインの認識テキスト（2026-11-04 の実機結果）を新しい `tools/cer.py` で再採点し、新系列の参考値としてベースライン文書（`docs/verification/2026-11-03-transcription-accuracy-baseline.md`）へ旧系列と並記で追記する。未決課題の節は ADR-046 で決定済みに更新する。
 - [x] Step 4: `docs/decisions.md` に ADR-046 を追記する（定義変更、系列分離、RED/GREEN の run ID）。
-- [ ] Step 5: PR の CI が全グリーンになることを確認する。マージは所有者の判断を待つ。
+- [x] Step 5: PR の CI が全グリーンになることを確認する。マージは所有者の判断を待つ。

@@ -360,6 +360,6 @@
   - 変換できない・曖昧な表記（単独の大単位、桁並び読みと単位表記の混在など）は変換しない。
 - 理由: 初回ベースラインの A（20.55%）の大半は数字の表記ゆれで、数字の多い文ほど CER が実態より悪く出る。精度改善の効果測定が表記に引っ張られないよう、CER が認識そのものを測る形にする（ベースライン文書の未決課題への回答）。
 - 系列の扱い: 変更後の採点は新系列とし、旧系列の値は消さずに並記する。初回ベースラインの認識テキストを新ルールで再採点した参考値は A 2.44% / B 0.00% / C 8.64%（旧系列は A 20.55% / B 2.63% / C 9.88%）。アプリ内ログ行の `ref=` / `hyp=` 文字数も正規化で変わる（例: A の ref は 73 → 82）。合成音声系列（`src=synth`）と実声系列の区別は従来どおり。
-- 検証: Core `TranscriptionScorerTests`（`TranscriptionScorerNumeralTests`）と `tools/test_cer.py` で同一ケースを確認。RED: run 41768864576（Core package tests のみ失敗）。GREEN: PR #9 の CI で確認する。
+- 検証: Core `TranscriptionScorerTests`（`TranscriptionScorerNumeralTests`）と `tools/test_cer.py` で同一ケースを確認。RED: run 41768864576（Core package tests のみ失敗）。GREEN: run 41778190124（PR #9、全ステップ成功）。途中の run 41769393341 ではアプリ側 `TranscriptionCheckTests` のログ行の文字数が旧ルールのままだったため単体テストが失敗し、期待値を新系列（A の ref 73→82、B の ref 76→77）に直してから全グリーンになった。
 - 影響要件: なし（検証の採点ルールのみ。認識そのものは変わらない）
 - 状態: 採用
