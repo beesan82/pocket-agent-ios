@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-04-term-accuracy-design.md`
 
-**CI:** RED: run 41840522226 (PR #10; Core package tests only, failing as expected). First implementation run 41842185686 failed the simulator build: the App layer annotated the option set as `ReportingOptions`, but the SDK's type is `SpeechTranscriber.ReportingOption` (singular — confirmed against Apple DocC, never guessed). GREEN: run 41844203003 (PR #10, every step successful).
+**CI:** RED: run 41840522226 (PR #10; Core package tests only, failing as expected). The first two implementation runs failed the simulator build on the composed options' type: run 41842185686 annotated it `SpeechTranscriber.ReportingOptions` (no such type), run 41844203003 annotated it `SpeechTranscriber.ReportingOption` (the enum case type — still not the property's type). Apple DocC declarations settled it: `Preset.reportingOptions` and the full initializer take `Set<SpeechTranscriber.ReportingOption>` (each option group is a Set of enum cases). GREEN: run 41847684876 (PR #10, every step successful).
 
 ## Global Constraints
 
@@ -35,9 +35,9 @@
 - Read only: SDK `Speech` module interface on the CI runner (Xcode 27), via a throwaway test target or a compile probe on a temporary branch (follow the AGENTS.md temporary-branch procedure for RED work).
 
 - [x] **Step 1: Confirm the preset composition.** Print or assert the `transcriptionOptions` / `reportingOptions` / `attributeOptions` of `SpeechTranscriber.Preset.progressiveTranscription` and of `.transcriptionWithAlternatives`; record the result in this plan.
-  - Recorded (CI run 41844203003, assertions and probe in `ProgressiveTranscriberTests`): `.progressiveTranscription` has no transcription options, reporting options = `volatileResults` + `fastResults`, and attribute options without `audioTimeRange`; the composed reporting options are exactly the preset's plus `alternativeTranscriptions`.
+  - Recorded (CI run 41847684876, assertions and probe in `ProgressiveTranscriberTests`): `.progressiveTranscription` has no transcription options, reporting options = `volatileResults` + `fastResults`, and attribute options without `audioTimeRange`; the composed reporting options are exactly the preset's plus `alternativeTranscriptions`.
 - [ ] **Step 2: Confirm the composed initializer works.** Build a transcriber from the progressive options plus `.alternativeTranscriptions` in `reportingOptions` and confirm `result.alternatives` is populated for a final result (device or simulator probe; if the simulator cannot transcribe, record it as a device-check item instead).
-  - Recorded: the composed initializer builds in CI (run 41844203003). Whether alternatives are actually populated needs real recognition, which the simulator cannot do here, so it is recorded as a device-check item (docs/phase0-checklist.md, ADR-047 section) and is covered by the Task 4 device run.
+  - Recorded: the composed initializer builds in CI (run 41847684876). Whether alternatives are actually populated needs real recognition, which the simulator cannot do here, so it is recorded as a device-check item (docs/phase0-checklist.md, ADR-047 section) and is covered by the Task 4 device run.
 
 ### Task 1: Term list in Core
 
@@ -47,7 +47,7 @@
 
 - [x] **Step 1: Write the failing tests.** The list contains the four target terms （露光装置， 歩留まり, 線幅， 規格） and the surrounding semiconductor terms from the spec; a `countOccurrences(in:)` helper counts listed terms in a normalized string.
 - [x] **Step 2: Confirm RED** on a temporary branch (packages-only CI), then implement and confirm GREEN.
-  - Recorded: RED in PR #10's first CI (run 41840522226), GREEN in run 41844203003.
+  - Recorded: RED in PR #10's first CI (run 41840522226), GREEN in run 41847684876.
 
 ### Task 2: Alternative selector in Core (Experiment 1 logic)
 
@@ -57,7 +57,7 @@
 
 - [x] **Step 1: Write the failing tests.** Cases: a candidate containing 露光装置 beats a top result containing 路行装置； equal term counts keep the original text; among winning candidates the smallest edit distance to the original wins; empty alternatives return the original; normalization matches the scorer's (ADR-046 series).
 - [x] **Step 2: Confirm RED**, implement the selector per the spec's evaluation/adoption rules, confirm GREEN.
-  - Recorded: RED in run 41840522226, GREEN in run 41844203003.
+  - Recorded: RED in run 41840522226, GREEN in run 41847684876.
 
 ### Task 3: Wire alternatives into the auto check behind an experiment switch
 
@@ -68,7 +68,7 @@
 
 - [x] **Step 1: Failing tests first** for the pure parts (option assembly produces reporting options including `.alternativeTranscriptions` only when ON; candidate extraction from a result-shaped value). Real recognition stays device-verified.
 - [x] **Step 2: Implement**, keeping the OFF configuration byte-identical to today's (`.progressiveTranscription` semantics), then CI GREEN.
-  - Recorded: the shared builder is `ProgressiveTranscriber` (`makeStandard` = the preset itself, used by both the live pipeline and the standard auto check; `make` = the composed options, used only by the experiment). First run 41842185686 failed on the option-set type name (see the CI line above); GREEN in run 41844203003.
+  - Recorded: the shared builder is `ProgressiveTranscriber` (`makeStandard` = the preset itself, used by both the live pipeline and the standard auto check; `make` = the composed options, used only by the experiment). Runs 41842185686 and 41844203003 failed on the composed options' type (see the CI line above); GREEN in run 41847684876.
 
 ### Task 4: Measure Experiment 1 on device and judge
 
