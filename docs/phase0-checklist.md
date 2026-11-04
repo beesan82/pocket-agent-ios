@@ -281,3 +281,15 @@
 - [ ] 測定ログに `src=synth` 付きの行が残り、本文が含まれないこと
 - [ ] 機内モードで完走すること／認識資産が未導入のときの導入またはエラー表示
 - [ ] 手動の読み上げチェックが従来どおり動き、ログ行に印が付かないこと（画面の CER と tools/cer.py の一致確認を含む）— 2026-11-04 時点で未実施。自動チェックを主手順にする方針のため後回しで、実声ベースライン（docs/verification/2026-11-03-transcription-accuracy-baseline.md の実声手順）も未実施のまま
+
+
+## 専門用語対策 実験1: 代替候補の選び直し（ADR-047）
+設計: docs/superpowers/specs/2026-11-04-term-accuracy-design.md / 計画: docs/superpowers/plans/2026-11-04-term-accuracy.md
+
+### 実装済み（CI で自動テスト合格）
+- [x] Core の用語リスト（`TranscriptionTerms`: 対象 4 語＋周辺語、用語エラー数）と候補の選び直し（`AlternativeSelector`: 用語の増加がある候補だけを編集距離で選ぶ）
+- [x] 合成オプションの共有ビルダー（`ProgressiveTranscriber`）と自動チェックの実験スイッチ（ON/OFF 比較、用語エラー数・候補ヒット数の表示、両条件の cer.journal 行。ON は `alt=on termerrors=<n>` 付き）
+
+### 実機で未検証（iPhone 15）
+- [ ] 実験スイッチ ON で自動チェックを実行し、C の CER と用語エラー数（OFF 4 → ON の値。採用目安は用語エラー 2 以下・CER 5% 以下）、A・B の退行が無いこと、候補ヒット数、ON/OFF の所要時間差を確認する（計画 Task 4 の測定と採用判定）
+- [ ] 代替候補が final 結果に実際に付くこと（件数の上限を含む）と、合成オプションでも言語資産の追加導入が要らないこと

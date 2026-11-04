@@ -33,6 +33,21 @@ enum TranscriptionAutoCheckError: Error {
 /// asset handling and the scoring (ADR-044).
 struct TranscriptionAutoChecker {
     func transcribe(passage: TranscriptionCheckPassage) async throws -> String {
+        try await transcribeSegments(passage: passage, alternatives: false)
+            .map(\.text)
+            .joined()
+    }
+
+    /// Recognizes one passage and returns every final result with the engine's
+    /// alternative readings of it. With `alternatives` off, the transcriber is
+    /// the standard configuration (the live path's preset, ADR-044) and the
+    /// candidate lists come back empty. With it on, the transcriber is built
+    /// from the composed options (`ProgressiveTranscriber`) so final results
+    /// carry alternatives — the input to Experiment 1's ON/OFF comparison.
+    /// Recognition settings are otherwise identical either way.
+    func transcribeSegments(
+        passage: TranscriptionCheckPassage, alternatives: Bool
+    ) async throws -> [TranscriptionSegmentCandidates] {
         let fileURL: URL
         do {
             fileURL = try TranscriptionCheckAudio.wavFileURL(
@@ -40,10 +55,14 @@ struct TranscriptionAutoChecker {
         } catch {
             throw TranscriptionAutoCheckError.audioUnavailable
         }
-        // Same locale resolution and preset as the live path (SpeechCapture).
+        // Same locale resolution as the live path (SpeechCapture); the
+        // configuration is the preset, or the composed options for the
+        // alternatives experiment.
         let requested = Locale(identifier: "ja_JP")
         let locale = await SpeechTranscriber.supportedLocale(equivalentTo: requested) ?? requested
-        let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
+        let transcriber = alternatives
+            ? ProgressiveTranscriber.make(locale: locale)
+            : ProgressiveTranscriber.makeStandard(locale: locale)
         try await ensureAssets(for: transcriber, locale: locale)
         guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw TranscriptionAutoCheckError.noAudioFormat
@@ -56,13 +75,15 @@ struct TranscriptionAutoChecker {
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let resultsTask = Task {
-            var text = ""
+            var segments: [TranscriptionSegmentCandidates] = []
             for try await result in transcriber.results {
                 if result.isFinal {
-                    text += String(result.text.characters)
+                    segments.append(TranscriptionSegmentCandidates(
+                        text: String(result.text.characters),
+                        alternatives: result.alternatives.map { String($0.characters) }))
                 }
             }
-            return text
+            return segments
         }
         let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
         do {

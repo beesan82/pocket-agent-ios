@@ -363,3 +363,13 @@
 - 検証: Core `TranscriptionScorerTests`（`TranscriptionScorerNumeralTests`）と `tools/test_cer.py` で同一ケースを確認。RED: run 41768864576（Core package tests のみ失敗）。GREEN: run 41778190124（PR #9、全ステップ成功）。途中の run 41769393341 ではアプリ側 `TranscriptionCheckTests` のログ行の文字数が旧ルールのままだったため単体テストが失敗し、期待値を新系列（A の ref 73→82、B の ref 76→77）に直してから全グリーンになった。
 - 影響要件: なし（検証の採点ルールのみ。認識そのものは変わらない）
 - 状態: 採用
+
+## ADR-047 専門用語対策は代替候補の選び直し→用語辞書の順で実験する
+- 決定:
+  - 固定文 C の専門用語エラー（新系列 CER 8.64%、用語エラー数 4）への対策として、まず `SpeechTranscriber` の代替候補（reportingOptions へ `.alternativeTranscriptions` を追加）を用語リストで選び直す実験（実験 1）を行い、届かない範囲を用語辞書の後処理（実験 2）で補う。判断基準は設計書 `docs/superpowers/specs/2026-11-04-term-accuracy-design.md` の数値どおりとする。
+  - 実験 1 の実装: 用語リストと選び直しの純ロジックは Core に置く（`TranscriptionTerms` / `AlternativeSelector`。採用条件は「用語出現数が元の text より多い候補の中で編集距離最小、同点なら元のまま」）。オプションの合成は共有ビルダー `ProgressiveTranscriber`（`.progressiveTranscription` プリセットのオプション集合に `.alternativeTranscriptions` を union し、フルイニシャライザで組み立てる）が担う。自動チェックに実験 ON/OFF スイッチを置き、同一音源で両条件を比較する。測定ログには両条件の `cer.journal` 行（ON は末尾に `alt=on termerrors=<n>` を追加）を残し、本文は残さない（ADR-026）。
+  - 採用が決まるまでライブ経路（日誌）の確定テキストと標準設定は変えない。標準設定は従来どおり `.progressiveTranscription` プリセットで、自動チェックと同一に保つ（ADR-044）。実験スイッチが唯一の意図的な乖離で、検証画面に明示する。
+- 理由: 主経路の `SpeechTranscriber` には用語ヒント（contextual strings）の公式手段が無く、エンジンが出す情報の範囲で改善するしかない。代替候補はエンジン自身の再解釈であり、決め打ち補正より過剰補正の危険が小さい。
+- 検証: Core `TranscriptionTermsTests` / `AlternativeSelectorTests`、App `ProgressiveTranscriberTests`（プリセット構成の裏取りを兼ねる。`.progressiveTranscription` は reportingOptions が volatileResults + fastResults、attributeOptions に audioTimeRange を含まないことを CI で確認）/ `TranscriptionExperimentTests`。RED: run 41840522226（Core package tests のみ失敗）。実装初回は合成オプションの型注釈を 2 度誤りシミュレータビルドで失敗（run 41842185686、41844203003）。Apple DocC の宣言で `Set<SpeechTranscriber.ReportingOption>` が正しい形と確定させて修正。GREEN: run 41847684876（PR #10、全ステップ成功）。実機での ON/OFF 測定と採用判定は計画 Task 4（未実施）。
+- 影響要件: なし（実験は検証画面の自動チェック内に閉じる。保存方針は ADR-026 のまま）
+- 状態: 採用（実験 1 を実装済み。実機測定・採用判定は未実施）
