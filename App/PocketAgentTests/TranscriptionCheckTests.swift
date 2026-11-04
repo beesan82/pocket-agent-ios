@@ -9,25 +9,25 @@ struct TranscriptionCheckTests {
         let result = try #require(TranscriptionCheck.evaluate(passage: .readingAloud, transcript: text))
         #expect(result.passage == .readingAloud)
         #expect(result.cer == 0)
-        #expect(result.referenceCharacters == 73)
-        #expect(result.hypothesisCharacters == 73)
-        #expect(result.logLine == "cer.journal passage=A cer=0.000 ref=73 hyp=73")
+        #expect(result.referenceCharacters == 82)
+        #expect(result.hypothesisCharacters == 82)
+        #expect(result.logLine == "cer.journal passage=A cer=0.000 ref=82 hyp=82")
     }
 
     @Test func punctuationOnlyDifferenceScoresZero() throws {
         let transcript = String(TranscriptionCheckPassage.readingAloud.text.filter { $0 != "、" && $0 != "。" })
         let result = try #require(TranscriptionCheck.evaluate(passage: .readingAloud, transcript: transcript))
         #expect(result.cer == 0)
-        #expect(result.hypothesisCharacters == 73)
+        #expect(result.hypothesisCharacters == 82)
     }
 
     @Test func droppedFirstCharacterScoresOneEdit() throws {
         let transcript = String(TranscriptionCheckPassage.monologueMemo.text.dropFirst())
         let result = try #require(TranscriptionCheck.evaluate(passage: .monologueMemo, transcript: transcript))
-        #expect(abs(result.cer - 1.0 / 76.0) < 1e-9)
-        #expect(result.referenceCharacters == 76)
-        #expect(result.hypothesisCharacters == 75)
-        #expect(result.logLine == "cer.journal passage=B cer=0.013 ref=76 hyp=75")
+        #expect(abs(result.cer - 1.0 / 77.0) < 1e-9)
+        #expect(result.referenceCharacters == 77)
+        #expect(result.hypothesisCharacters == 76)
+        #expect(result.logLine == "cer.journal passage=B cer=0.013 ref=77 hyp=76")
     }
 
     @Test func emptyTranscriptScoresOne() throws {
@@ -43,7 +43,7 @@ struct TranscriptionCheckTests {
         let result = try #require(TranscriptionCheck.evaluate(passage: .readingAloud, transcript: text, source: .synth))
         #expect(result.source == .synth)
         #expect(result.cer == 0)
-        #expect(result.logLine == "cer.journal passage=A cer=0.000 ref=73 hyp=73 src=synth")
+        #expect(result.logLine == "cer.journal passage=A cer=0.000 ref=82 hyp=82 src=synth")
     }
 
     @Test func voiceRunIsTheDefaultAndStaysUnmarked() throws {
