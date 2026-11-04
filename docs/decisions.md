@@ -339,6 +339,6 @@
   - 同梱するのは合成した固定文の音声だけ。実音声は入れない。
 - 理由: 手動チェックは読み手の人手と読み方のぶれが入り、「測りたいときにすぐ測る」ことができない。音源を固定した自動チェックがあれば、エンジン差し替えや整文の前後比較を再現性のある数字で回せる。
 - 物差しの性質: 合成音声は明瞭で雑音がなく、CER は実声より楽に出る。合成音声の数字は回帰の物差しであり、実利用の精度そのものではない。実声のベースライン（`docs/verification/2026-11-03-transcription-accuracy-baseline.md` の手動測定）は引き続き正で、置き換えない。比較表では `src=synth` の有無で系列を分ける。
-- 検証: App `TranscriptionAutoCheckTests`（文と素材の対応付け、同梱素材の存在、復元した WAV の妥当性）、`TranscriptionCheckTests`（`src=synth` 付きログ行の形式）。`SpeechAnalyzer` の実認識は実機のみ（手順: `docs/verification/2026-11-04-transcription-auto-check.md`）。
+- 検証: App `TranscriptionAutoCheckTests`（文と素材の対応付け、同梱素材の存在、復元した WAV の妥当性）、`TranscriptionCheckTests`（`src=synth` 付きログ行の形式）。RED: run 41661035244。GREEN: run 41664296506（全ステップ成功、PR #7）。`SpeechAnalyzer` の実認識は実機のみ（手順: `docs/verification/2026-11-04-transcription-auto-check.md`）。
 - 影響要件: なし（検証機能の追加。保存方針は ADR-026 のまま）
 - 状態: 採用（実機未検証）
