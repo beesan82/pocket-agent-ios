@@ -274,8 +274,10 @@
 - [x] 固定文 A〜C の合成音声（VOICEVOX）の base64 同梱と、実行時の WAV 復元
 - [x] ファイルのバッファを日誌経路と同一設定の SpeechAnalyzer へ投入する自動チェックと、`src=synth` 付きの cer.journal 行
 
+### 実機で確認済み
+- [x] 自動チェックで A〜C の CER と認識テキストが出ること — 2026-11-04、iPhone 15 / iOS 27、TestFlight build 24（Codemagic #22、main e4f9e99）。A 20.55% / B 2.63% / C 9.88%（初回の自動チェックベースライン。A の高値は数字の表記ゆれが大半。読み解きは docs/verification/2026-11-03-transcription-accuracy-baseline.md の「自動チェックの記録」）
+
 ### 実機で未検証（iPhone 15、手順: docs/verification/2026-11-04-transcription-auto-check.md）
-- [ ] 自動チェックで A〜C の CER と認識テキストが出ること
 - [ ] 測定ログに `src=synth` 付きの行が残り、本文が含まれないこと
 - [ ] 機内モードで完走すること／認識資産が未導入のときの導入またはエラー表示
-- [ ] 手動の読み上げチェックが従来どおり動き、ログ行に印が付かないこと
+- [ ] 手動の読み上げチェックが従来どおり動き、ログ行に印が付かないこと（画面の CER と tools/cer.py の一致確認を含む）— 2026-11-04 時点で未実施。自動チェックを主手順にする方針のため後回しで、実声ベースライン（docs/verification/2026-11-03-transcription-accuracy-baseline.md の実声手順）も未実施のまま
