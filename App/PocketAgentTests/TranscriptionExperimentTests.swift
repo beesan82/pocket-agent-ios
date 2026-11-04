@@ -54,6 +54,60 @@ struct TranscriptionExperimentTests {
         #expect(outcome.candidateTargetHits == 0)
     }
 
+    @Test func dictionaryFixesPassageC() throws {
+        let segments = [TranscriptionSegmentCandidates(text: observedC, alternatives: [])]
+        let outcome = try #require(TranscriptionExperiment.evaluateDictionary(
+            passage: .meetingTechnical, segments: segments))
+        #expect(outcome.offTermErrorCount == 4)
+        #expect(outcome.onTermErrorCount == 0)
+        #expect(outcome.correctionCount == 4)
+        #expect(outcome.onResult.cer == 0)
+        #expect(outcome.offLogLine == outcome.offResult.logLine)
+        #expect(outcome.onLogLine == outcome.onResult.logLine + " dict=on termerrors=0 corrections=4")
+    }
+
+    @Test func dictionaryAppliesPerSegment() throws {
+        let segments = [
+            TranscriptionSegmentCandidates(text: "路行装置の", alternatives: []),
+            TranscriptionSegmentCandidates(text: "ぶどまりです", alternatives: []),
+        ]
+        let outcome = try #require(TranscriptionExperiment.evaluateDictionary(
+            passage: .meetingTechnical, segments: segments))
+        #expect(outcome.onTranscript == "露光装置の歩留まりです")
+        #expect(outcome.correctionCount == 2)
+    }
+
+    @Test func dictionaryNeverFiresOnPassagesAAndB() throws {
+        for passage in [TranscriptionCheckPassage.readingAloud, .monologueMemo] {
+            let segments = [TranscriptionSegmentCandidates(text: passage.text, alternatives: [])]
+            let outcome = try #require(TranscriptionExperiment.evaluateDictionary(
+                passage: passage, segments: segments))
+            #expect(outcome.correctionCount == 0, "fired on passage \(passage.label)")
+            #expect(outcome.onTranscript == passage.text)
+            #expect(outcome.onResult.cer == outcome.offResult.cer)
+            #expect(outcome.onTermErrorCount == 0)
+        }
+    }
+
+    @Test func dictionaryLeavesLegitimateKikakuAlone() throws {
+        let segments = [TranscriptionSegmentCandidates(text: "企画を立てます", alternatives: [])]
+        let outcome = try #require(TranscriptionExperiment.evaluateDictionary(
+            passage: .monologueMemo, segments: segments))
+        #expect(outcome.correctionCount == 0)
+        #expect(outcome.onTranscript == "企画を立てます")
+    }
+
+    @Test func dictionaryLogLinesCarryCountsOnly() throws {
+        let segments = [TranscriptionSegmentCandidates(text: observedC, alternatives: [])]
+        let outcome = try #require(TranscriptionExperiment.evaluateDictionary(
+            passage: .meetingTechnical, segments: segments))
+        for line in [outcome.offLogLine, outcome.onLogLine] {
+            #expect(!line.contains("露光"))
+            #expect(!line.contains("議題"))
+            #expect(line.contains("src=synth"))
+        }
+    }
+
     @Test func logLinesCarryCountsOnly() throws {
         let segments = [TranscriptionSegmentCandidates(
             text: observedC,

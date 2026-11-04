@@ -73,6 +73,8 @@ struct MLXValidationView: View {
     @State private var autoErrors: [TranscriptionCheckPassage: String] = [:]
     @State private var autoExperiment = false
     @State private var autoExperimentOutcomes: [TranscriptionCheckPassage: TranscriptionExperimentOutcome] = [:]
+    @State private var autoDictionary = false
+    @State private var autoDictionaryOutcomes: [TranscriptionCheckPassage: TranscriptionDictionaryOutcome] = [:]
     @State private var copied = false
     @State private var confirmClear = false
     @State private var clearFailed = false
@@ -612,6 +614,12 @@ struct MLXValidationView: View {
                 Text("ON のとき下の CER とテキストは選び直し適用後の値。実験OFF の CER・用語エラー数・候補ヒット数を並べて表示し、測定ログには両方の行（ON は alt=on 付き）を残す。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
+            Toggle("実験2 用語辞書の後処理", isOn: $autoDictionary)
+                .disabled(checkBusy || autoRunningPassage != nil)
+            if autoDictionary {
+                Text("ON のとき下の CER とテキストは辞書補正後の値（実験1 も ON のときは選び直しの上に重ねる）。辞書OFF の CER・用語エラー数・補正の発動回数を並べて表示し、測定ログには両方の行（ON は dict=on 付き）を残す。A・B で発動したら過剰補正の兆候。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             ForEach(TranscriptionCheckPassage.allCases, id: \.self) { passage in
                 if let result = autoResults[passage] {
                     LabeledContent("\(passage.label) CER", value: String(format: "%.2f%%", result.cer * 100))
@@ -626,6 +634,11 @@ struct MLXValidationView: View {
                     LabeledContent("\(passage.label) 実験OFF CER", value: String(format: "%.2f%%", outcome.offResult.cer * 100))
                     LabeledContent("\(passage.label) 用語エラー", value: "OFF \(outcome.offTermErrorCount) → ON \(outcome.onTermErrorCount)")
                     LabeledContent("\(passage.label) 候補ヒット", value: "\(outcome.candidateTargetHits)")
+                }
+                if let outcome = autoDictionaryOutcomes[passage] {
+                    LabeledContent("\(passage.label) 辞書OFF CER", value: String(format: "%.2f%%", outcome.offResult.cer * 100))
+                    LabeledContent("\(passage.label) 用語エラー（辞書）", value: "OFF \(outcome.offTermErrorCount) → ON \(outcome.onTermErrorCount)")
+                    LabeledContent("\(passage.label) 辞書発動", value: "\(outcome.correctionCount)")
                 }
             }
         }
@@ -670,27 +683,61 @@ struct MLXValidationView: View {
     /// options instead and scored both ways (the standard line and the `alt=on` line
     /// are both logged, counts and CER only — ADR-026); the switch is the one
     /// sanctioned divergence from the live-path configuration, and it is visible here.
+    /// The Experiment 2 switch layers the term dictionary on top: it scores the
+    /// corrected text both ways too (the ON line carries `dict=on` and the firing
+    /// count), applied per final segment over the Experiment 1 selection when
+    /// both switches are on, and over the standard text otherwise. Dictionary-only
+    /// runs recognize with the standard configuration — the corrector needs no
+    /// alternatives.
     private func runAutoCheck() {
         autoTask?.cancel()
         autoResults = [:]
         autoTranscripts = [:]
         autoErrors = [:]
         autoExperimentOutcomes = [:]
+        autoDictionaryOutcomes = [:]
         let checker = TranscriptionAutoChecker()
         let experiment = autoExperiment
+        let dictionary = autoDictionary
         autoTask = Task {
             for passage in TranscriptionCheckPassage.allCases {
                 autoRunningPassage = passage
                 do {
-                    if experiment {
-                        let segments = try await checker.transcribeSegments(passage: passage, alternatives: true)
-                        if let outcome = TranscriptionExperiment.evaluate(passage: passage, segments: segments) {
-                            autoExperimentOutcomes[passage] = outcome
-                            autoResults[passage] = outcome.onResult
-                            autoTranscripts[passage] = outcome.onTranscript
-                            measurementLog.append(outcome.offLogLine)
-                            measurementLog.append(outcome.onLogLine)
-                        } else {
+                    if experiment || dictionary {
+                        let segments = try await checker.transcribeSegments(
+                            passage: passage, alternatives: experiment)
+                        var baseSegments = segments
+                        var scored = false
+                        if experiment {
+                            if let outcome = TranscriptionExperiment.evaluate(passage: passage, segments: segments) {
+                                autoExperimentOutcomes[passage] = outcome
+                                autoResults[passage] = outcome.onResult
+                                autoTranscripts[passage] = outcome.onTranscript
+                                measurementLog.append(outcome.offLogLine)
+                                measurementLog.append(outcome.onLogLine)
+                                scored = true
+                                baseSegments = segments.map {
+                                    TranscriptionSegmentCandidates(
+                                        text: AlternativeSelector.select(
+                                            original: $0.text, alternatives: $0.alternatives).text,
+                                        alternatives: [])
+                                }
+                            }
+                        }
+                        if dictionary {
+                            if let outcome = TranscriptionExperiment.evaluateDictionary(
+                                passage: passage, segments: baseSegments) {
+                                autoDictionaryOutcomes[passage] = outcome
+                                autoResults[passage] = outcome.onResult
+                                autoTranscripts[passage] = outcome.onTranscript
+                                if !experiment {
+                                    measurementLog.append(outcome.offLogLine)
+                                }
+                                measurementLog.append(outcome.onLogLine)
+                                scored = true
+                            }
+                        }
+                        if !scored {
                             autoErrors[passage] = "採点できませんでした。"
                         }
                     } else {
