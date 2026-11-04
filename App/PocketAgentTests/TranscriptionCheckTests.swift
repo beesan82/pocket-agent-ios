@@ -38,6 +38,21 @@ struct TranscriptionCheckTests {
         #expect(result.logLine == "cer.journal passage=C cer=1.000 ref=81 hyp=0")
     }
 
+    @Test func synthesizedRunMarksTheLogLineWithSrcSynth() throws {
+        let text = TranscriptionCheckPassage.readingAloud.text
+        let result = try #require(TranscriptionCheck.evaluate(passage: .readingAloud, transcript: text, source: .synth))
+        #expect(result.source == .synth)
+        #expect(result.cer == 0)
+        #expect(result.logLine == "cer.journal passage=A cer=0.000 ref=73 hyp=73 src=synth")
+    }
+
+    @Test func voiceRunIsTheDefaultAndStaysUnmarked() throws {
+        let text = TranscriptionCheckPassage.monologueMemo.text
+        let result = try #require(TranscriptionCheck.evaluate(passage: .monologueMemo, transcript: text))
+        #expect(result.source == .voice)
+        #expect(!result.logLine.contains("src="))
+    }
+
     @Test func logLineNeverContainsTheTranscriptOrPassageBody() throws {
         // The measurement log only receives counts and the CER, never body text.
         let text = TranscriptionCheckPassage.readingAloud.text

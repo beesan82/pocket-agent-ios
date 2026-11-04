@@ -66,6 +66,11 @@ struct MLXValidationView: View {
     @State private var checkResult: TranscriptionCheckResult?
     @State private var checkTranscript: String?
     @State private var checkMessage: String?
+    @State private var autoTask: Task<Void, Never>?
+    @State private var autoRunningPassage: TranscriptionCheckPassage?
+    @State private var autoResults: [TranscriptionCheckPassage: TranscriptionCheckResult] = [:]
+    @State private var autoTranscripts: [TranscriptionCheckPassage: String] = [:]
+    @State private var autoErrors: [TranscriptionCheckPassage: String] = [:]
     @State private var copied = false
     @State private var confirmClear = false
     @State private var clearFailed = false
@@ -572,7 +577,7 @@ struct MLXValidationView: View {
                     Text(passage.label).tag(passage)
                 }
             }
-            .disabled(checkBusy)
+            .disabled(checkBusy || autoRunningPassage != nil)
             Text(checkPassage.text).font(.footnote).foregroundStyle(.secondary)
             if let checkMessage {
                 Text(checkMessage).font(.footnote).foregroundStyle(.red)
@@ -581,6 +586,7 @@ struct MLXValidationView: View {
                 Button("停止", role: .destructive) { stopTranscriptionCheck() }
             } else {
                 Button("録音") { startTranscriptionCheck() }
+                    .disabled(autoRunningPassage != nil)
             }
             if checkSpeech.state == .recording, !checkSpeech.volatileText.isEmpty {
                 Text(checkSpeech.volatileText).foregroundStyle(.secondary)
@@ -590,6 +596,24 @@ struct MLXValidationView: View {
             }
             if let checkTranscript {
                 Text(checkTranscript).textSelection(.enabled)
+            }
+            Divider()
+            if let autoRunningPassage {
+                LabeledContent("自動チェック", value: "\(autoRunningPassage.label) を実行中…")
+            } else {
+                Button("自動チェック") { runAutoCheck() }
+                    .disabled(checkBusy)
+            }
+            ForEach(TranscriptionCheckPassage.allCases, id: \.self) { passage in
+                if let result = autoResults[passage] {
+                    LabeledContent("\(passage.label) CER", value: String(format: "%.2f%%", result.cer * 100))
+                }
+                if let error = autoErrors[passage] {
+                    Text("\(passage.label): \(error)").font(.footnote).foregroundStyle(.red)
+                }
+                if let transcript = autoTranscripts[passage] {
+                    Text(transcript).font(.footnote).textSelection(.enabled)
+                }
             }
         }
         .buttonStyle(.bordered)
@@ -624,6 +648,37 @@ struct MLXValidationView: View {
             checkResult = result
             checkTranscript = checkSpeech.finalText
             measurementLog.append(result.logLine)
+        }
+    }
+
+    /// Runs the bundled synthesized passages (A→B→C) through the same recognizer settings
+    /// and logs each score with a `src=synth` marker; the transcripts stay on screen (ADR-044).
+    private func runAutoCheck() {
+        autoTask?.cancel()
+        autoResults = [:]
+        autoTranscripts = [:]
+        autoErrors = [:]
+        let checker = TranscriptionAutoChecker()
+        autoTask = Task {
+            for passage in TranscriptionCheckPassage.allCases {
+                autoRunningPassage = passage
+                do {
+                    let transcript = try await checker.transcribe(passage: passage)
+                    autoTranscripts[passage] = transcript
+                    if let result = TranscriptionCheck.evaluate(passage: passage, transcript: transcript, source: .synth) {
+                        autoResults[passage] = result
+                        measurementLog.append(result.logLine)
+                    } else {
+                        autoErrors[passage] = "採点できませんでした。"
+                    }
+                } catch let error as TranscriptionAutoCheckError {
+                    autoErrors[passage] = error.userMessage
+                } catch {
+                    autoErrors[passage] = TranscriptionAutoCheckError.recognitionFailed.userMessage
+                }
+            }
+            autoRunningPassage = nil
+            autoTask = nil
         }
     }
 
