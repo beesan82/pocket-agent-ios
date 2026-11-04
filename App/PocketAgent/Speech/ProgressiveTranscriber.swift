@@ -14,7 +14,7 @@ import Speech
 /// live path switches to it only if the experiment is adopted.
 enum ProgressiveTranscriber {
     /// The preset's reporting options plus `.alternativeTranscriptions`.
-    static let reportingOptions: SpeechTranscriber.ReportingOptions =
+    static let reportingOptions: SpeechTranscriber.ReportingOption =
         SpeechTranscriber.Preset.progressiveTranscription.reportingOptions
             .union([.alternativeTranscriptions])
 
