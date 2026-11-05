@@ -73,7 +73,10 @@ struct MLXValidationView: View {
     @State private var autoErrors: [TranscriptionCheckPassage: String] = [:]
     @State private var autoExperiment = false
     @State private var autoExperimentOutcomes: [TranscriptionCheckPassage: TranscriptionExperimentOutcome] = [:]
-    @State private var autoDictionary = false
+    // The term dictionary is adopted into the live path (ADR-047), so the check
+    // defaults to the live-path configuration (dictionary ON); turning it off
+    // still measures the raw recognition — the yardstick series.
+    @State private var autoDictionary = true
     @State private var autoDictionaryOutcomes: [TranscriptionCheckPassage: TranscriptionDictionaryOutcome] = [:]
     @State private var copied = false
     @State private var confirmClear = false
@@ -557,7 +560,8 @@ struct MLXValidationView: View {
 
     private func logSpeechResult() {
         speechChars = speech.finalText.count
-        measurementLog.append("音声30秒テスト結果: 確定テキスト \(speech.finalText.count) 字")
+        // The correction count is counts-only (ADR-026), like the check journals.
+        measurementLog.append("音声30秒テスト結果: 確定テキスト \(speech.finalText.count) 字 / 用語補正 \(speech.termCorrectionCount) 件")
         measurementLog.append("  > \(speech.finalText)")
     }
 
@@ -614,10 +618,10 @@ struct MLXValidationView: View {
                 Text("ON のとき下の CER とテキストは選び直し適用後の値。実験OFF の CER・用語エラー数・候補ヒット数を並べて表示し、測定ログには両方の行（ON は alt=on 付き）を残す。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            Toggle("実験2 用語辞書の後処理", isOn: $autoDictionary)
+            Toggle("用語辞書の後処理（本採用）", isOn: $autoDictionary)
                 .disabled(checkBusy || autoRunningPassage != nil)
             if autoDictionary {
-                Text("ON のとき下の CER とテキストは辞書補正後の値（実験1 も ON のときは選び直しの上に重ねる）。辞書OFF の CER・用語エラー数・補正の発動回数を並べて表示し、測定ログには両方の行（ON は dict=on 付き）を残す。A・B で発動したら過剰補正の兆候。")
+                Text("用語辞書は単言語の実経路に本採用済み（ADR-047）。ON（既定）のとき下の CER とテキストは実経路と同じ辞書補正後の値（実験1 も ON のときは選び直しの上に重ねる）。OFF にすると生の認識結果を測れる（物差しの系列はそちらで維持）。辞書OFF の CER・用語エラー数・補正の発動回数を並べて表示し、測定ログには両方の行（ON は dict=on 付き）を残す。A・B で発動したら過剰補正の兆候。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             ForEach(TranscriptionCheckPassage.allCases, id: \.self) { passage in
@@ -683,12 +687,15 @@ struct MLXValidationView: View {
     /// options instead and scored both ways (the standard line and the `alt=on` line
     /// are both logged, counts and CER only — ADR-026); the switch is the one
     /// sanctioned divergence from the live-path configuration, and it is visible here.
-    /// The Experiment 2 switch layers the term dictionary on top: it scores the
-    /// corrected text both ways too (the ON line carries `dict=on` and the firing
-    /// count), applied per final segment over the Experiment 1 selection when
-    /// both switches are on, and over the standard text otherwise. Dictionary-only
-    /// runs recognize with the standard configuration — the corrector needs no
-    /// alternatives.
+    /// The dictionary switch controls the term-dictionary comparison: the
+    /// dictionary is adopted into the live path (ADR-047), so ON (the default)
+    /// scores the text exactly as the live path finalizes it, and OFF scores
+    /// the raw recognition — the yardstick series stays measurable. It scores
+    /// the corrected text both ways (the ON line carries `dict=on` and the
+    /// firing count), applied per final segment over the Experiment 1 selection
+    /// when both switches are on, and over the standard text otherwise.
+    /// Dictionary-only runs recognize with the standard configuration — the
+    /// corrector needs no alternatives.
     private func runAutoCheck() {
         autoTask?.cancel()
         autoResults = [:]
