@@ -67,4 +67,58 @@ enum TranscriptionExperiment {
             offLogLine: offResult.logLine,
             onLogLine: onResult.logLine + " alt=on termerrors=\(onTermErrorCount)")
     }
+
+    /// Returns nil when the passage cannot be scored (same condition as
+    /// `TranscriptionCheck.evaluate`).
+    static func evaluateDictionary(
+        passage: TranscriptionCheckPassage, segments: [TranscriptionSegmentCandidates]
+    ) -> TranscriptionDictionaryOutcome? {
+        let offTranscript = segments.map(\.text).joined()
+        var correctionCount = 0
+        let onTranscript = segments.map { segment in
+            let outcome = TermCorrector.correct(segment.text)
+            correctionCount += outcome.totalCount
+            return outcome.text
+        }.joined()
+        guard let offResult = TranscriptionCheck.evaluate(
+                passage: passage, transcript: offTranscript, source: .synth),
+              let onResult = TranscriptionCheck.evaluate(
+                passage: passage, transcript: onTranscript, source: .synth)
+        else { return nil }
+        let offTermErrorCount = TranscriptionTerms.termErrorCount(
+            reference: passage.text, hypothesis: offTranscript)
+        let onTermErrorCount = TranscriptionTerms.termErrorCount(
+            reference: passage.text, hypothesis: onTranscript)
+        return TranscriptionDictionaryOutcome(
+            offResult: offResult, onResult: onResult,
+            offTranscript: offTranscript, onTranscript: onTranscript,
+            offTermErrorCount: offTermErrorCount, onTermErrorCount: onTermErrorCount,
+            correctionCount: correctionCount,
+            offLogLine: offResult.logLine,
+            onLogLine: onResult.logLine
+                + " dict=on termerrors=\(onTermErrorCount) corrections=\(correctionCount)")
+    }
+}
+
+/// The ON/OFF comparison of one passage under Experiment 2 (term-dictionary
+/// post-processing). OFF is the base text — the engine's top results as the
+/// standard auto check joins them, or the Experiment 1 selection when that
+/// experiment is also on; ON applies `TermCorrector` to each final segment
+/// on top of it. Log lines carry counts and CER only — never text
+/// (ADR-026); the ON line adds the dictionary markers
+/// (`dict=on termerrors=… corrections=…`) to its standard line. The format
+/// is defined in the baseline document
+/// (docs/verification/2026-11-03-transcription-accuracy-baseline.md).
+struct TranscriptionDictionaryOutcome {
+    let offResult: TranscriptionCheckResult
+    let onResult: TranscriptionCheckResult
+    let offTranscript: String
+    let onTranscript: String
+    let offTermErrorCount: Int
+    let onTermErrorCount: Int
+    /// Total dictionary firings across all segments — the over-correction
+    /// signal on passages A and B, where any firing is abnormal.
+    let correctionCount: Int
+    let offLogLine: String
+    let onLogLine: String
 }

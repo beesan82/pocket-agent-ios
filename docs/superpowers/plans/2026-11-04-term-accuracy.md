@@ -75,10 +75,14 @@
 **Files:**
 - Modify: `docs/verification/2026-11-03-transcription-accuracy-baseline.md` (record ON/OFF values), `docs/phase0-checklist.md` (device-check entry)
 
-- [ ] **Step 1: Device run.** Auto check with the experiment OFF and ON for A–C; record C's CER and term-error count (target 4 → ≤2, CER ≤ ~5%), A/B regression check (A 2.44% / B 0.00% must not worsen), ON/OFF duration comparison, and how often the target terms appeared in the alternatives at all.
-- [ ] **Step 2: Judge by the spec's criteria.** Adopt → Task 5. No term ever appears in alternatives → record "no-show" and go to Task 6. Otherwise record rejection with the numbers.
+- [x] **Step 1: Device run.** Auto check with the experiment OFF and ON for A–C; record C's CER and term-error count (target 4 → ≤2, CER ≤ ~5%), A/B regression check (A 2.44% / B 0.00% must not worsen), ON/OFF duration comparison, and how often the target terms appeared in the alternatives at all.
+  - Recorded (2026-11-05, iPhone 15, TestFlight build of main 5216912 / Codemagic build 6aebb41a, experiment ON): A — CER OFF 2.44% / ON 2.44%, term errors 0 → 0, candidate target hits 0. B — CER OFF 0.00% / ON 0.00%, term errors 0 → 0, hits 0. C — CER OFF 8.64% / ON 8.64%, term errors 4 → 4, hits 0. No A/B regression (nothing changed at all). The ON/OFF duration comparison was not captured in the device report and remains unmeasured.
+- [x] **Step 2: Judge by the spec's criteria.** Adopt → Task 5. No term ever appears in alternatives → record "no-show" and go to Task 6. Otherwise record rejection with the numbers.
+  - Recorded: no-show. Across all three passages the alternatives never contained a single target term (candidate target hits 0 everywhere), so the selector had nothing to adopt. Experiment 1 is **not adopted**; Task 5 is skipped and the work proceeds to Task 6 (Experiment 2), per the spec's judgment criteria.
 
 ### Task 5: Adopt Experiment 1 into the live path (only if Task 4 adopts)
+
+> Recorded (2026-11-05): skipped — Task 4 judged Experiment 1 a no-show and did not adopt it, so the live path keeps the standard configuration.
 
 **Files:**
 - Modify: `App/PocketAgent/Speech/SpeechCapture.swift` (single-language path uses the composed options and applies the selector to final results before emitting `.final` events)
@@ -93,8 +97,10 @@
 - Create: `Packages/PocketAgentCore/Sources/PocketAgentCore/TermCorrector.swift`
 - Create: `Packages/PocketAgentCore/Tests/PocketAgentCoreTests/TermCorrectorTests.swift`
 
-- [ ] **Step 1: Write the failing tests.** Unconditional pairs （路行装置→露光装置, ぶどまり→歩留まり） fire anywhere in a final text; context-conditioned pairs （企画→規格, 先幅→線幅） fire only with their context condition and never on the A/B passage texts; the corrector returns the corrected text plus a count (counts only — no text — is what callers may log).
-- [ ] **Step 2: Confirm RED**, implement with per-pair ON/OFF, confirm GREEN. Any pair whose context condition cannot be made precise is dropped, not shipped fuzzy.
+- [x] **Step 1: Write the failing tests.** Unconditional pairs （路行装置→露光装置, ぶどまり→歩留まり） fire anywhere in a final text; context-conditioned pairs （企画→規格, 先幅→線幅） fire only with their context condition and never on the A/B passage texts; the corrector returns the corrected text plus a count (counts only — no text — is what callers may log).
+- [x] **Step 2: Confirm RED**, implement with per-pair ON/OFF, confirm GREEN. Any pair whose context condition cannot be made precise is dropped, not shipped fuzzy.
+  - Recorded: RED in run 41931972086 (PR #11; the commit's only change is the Core test file referencing the not-yet-existing `TermCorrector`). GREEN in run 41932238853 (PR #11).
+  - Context conditions, as registered in `TermCorrector`: 企画→規格 fires only when the text immediately after 企画 starts with を超え / が超え / 外 / 値 (spec collocations: a limit exceeded, out-of-spec, a spec value — a "project/plan" never takes these continuations). 先幅→線幅 fires only before measurement collocations （のばらつき / の変動 / の均一 / の精度 / の測定 / の管理 / を測定 / を管理 / がばらつ）. Both conditions could be made precise against the observed error and ordinary usage, so both pairs are registered; the per-pair switch (`disabledRuleIDs`) remains the escape hatch if the device measurement shows over-correction.
 
 ### Task 7: Measure Experiment 2 in the auto check and judge
 
@@ -102,6 +108,7 @@
 - Modify: auto-check wiring (apply the corrector after selection when the Experiment 2 switch is ON; show the correction count on screen), `docs/verification/2026-11-03-transcription-accuracy-baseline.md`, `docs/phase0-checklist.md`
 
 - [ ] **Step 1: Device run.** A–C with Experiment 2 OFF/ON (on top of the Experiment 1 outcome); record C's CER (target ≤5%) and term-error count (target 4 → ≤1), and confirm zero corrector firings on A and B.
+  - Wiring recorded (PR #11): the auto check gained an Experiment 2 switch (`TranscriptionExperiment.evaluateDictionary`); ON applies the corrector per final segment on top of the Experiment 1 selection when both switches are on, displays the OFF/ON CER, term errors and firing count, and logs the `dict=on` line. The device run itself is still outstanding.
 - [ ] **Step 2: Judge by the spec's criteria.** Adopt (possibly reduced to unconditional pairs only) → apply to the live path's final results like Task 5 and register the outcome in ADR-047's follow-up note; reject → record the numbers and stop, per the spec's "both rejected" clause.
 
 ---
