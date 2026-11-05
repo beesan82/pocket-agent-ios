@@ -41,6 +41,9 @@ final class SpeechCapture: TranscriptSource {
     private(set) var volatileText = ""
     /// All final results joined without separators (Japanese needs no spaces).
     private(set) var finalText = ""
+    /// Firings of the adopted term dictionary (ADR-047) in the current capture, single-language
+    /// finals only. Counts only — never text — so it is safe to log (ADR-026).
+    private(set) var termCorrectionCount = 0
     private(set) var reason: SpeechUnavailableReason?
     /// Bilingual capture: the latest tentative text per language ("ja" / "en").
     private(set) var laneVolatile: [String: String] = [:]
@@ -127,6 +130,7 @@ final class SpeechCapture: TranscriptSource {
         resultsFailedWhilePreparing = false
         volatileText = ""
         finalText = ""
+        termCorrectionCount = 0
         laneVolatile = [:]
         let (stream, continuation) = AsyncStream.makeStream(of: TranscriptEvent.self)
         events?.finish()
@@ -248,6 +252,15 @@ final class SpeechCapture: TranscriptSource {
         startedAt.map { Date().timeIntervalSince($0) } ?? 0
     }
 
+    /// Applies the adopted term dictionary (ADR-047, Experiment 2 adopted in Task 7) to one
+    /// final result of the single-language path. The bilingual path finalizes its text in
+    /// `MeetingSession` through `LanguageArbiter` and shares no finalization point with this
+    /// path, so bilingual finals are NOT corrected here; that combination needs its own design
+    /// (recorded as unverified in docs/phase0-checklist.md).
+    nonisolated static func correctFinalText(_ text: String) -> TermCorrector.Outcome {
+        TermCorrector.correct(text)
+    }
+
     /// `language` is nil for a single-language capture (`.final` / `.volatile` events as before).
     private func consume(_ transcriber: SpeechTranscriber, language: String?) async {
         do {
@@ -259,9 +272,14 @@ final class SpeechCapture: TranscriptSource {
                     continue
                 }
                 if result.isFinal {
-                    finalText += text
+                    // The adopted term dictionary (ADR-047) rewrites known misrecognitions in
+                    // final text; volatile results pass through uncorrected.
+                    let outcome = Self.correctFinalText(text)
+                    termCorrectionCount += outcome.totalCount
+                    let corrected = outcome.text
+                    finalText += corrected
                     volatileText = ""
-                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let trimmed = corrected.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
                         events?.yield(.final(TranscriptSegment(offset: offset(for: result.range), text: trimmed)))
                     }
