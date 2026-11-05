@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-04-term-accuracy-design.md`
 
-**CI:** RED: run 41840522226 (PR #10; Core package tests only, failing as expected). The first two implementation runs failed the simulator build on the composed options' type: run 41842185686 annotated it `SpeechTranscriber.ReportingOptions` (no such type), run 41844203003 annotated it `SpeechTranscriber.ReportingOption` (the enum case type — still not the property's type). Apple DocC declarations settled it: `Preset.reportingOptions` and the full initializer take `Set<SpeechTranscriber.ReportingOption>` (each option group is a Set of enum cases). GREEN: run 41847684876 (PR #10, every step successful).
+**CI:** RED: run 41840522226 (PR #10; Core package tests only, failing as expected). The first two implementation runs failed the simulator build on the composed options' type: run 41842185686 annotated it `SpeechTranscriber.ReportingOptions` (no such type), run 41844203003 annotated it `SpeechTranscriber.ReportingOption` (the enum case type — still not the property's type). Apple DocC declarations settled it: `Preset.reportingOptions` and the full initializer take `Set<SpeechTranscriber.ReportingOption>` (each option group is a Set of enum cases). GREEN: run 41847684876 (PR #10, every step successful). Experiment 2 adoption into the live path (Task 8): RED run 42049556248 (temporary PR #13 reproducing the test-only state — PR #12's own first run, 42042582698, was cancelled by the branch concurrency during the simulator build, before the unit-test step, so RED was re-confirmed on the temporary branch). GREEN: run 42044719928 (PR #12, every step successful).
 
 ## Global Constraints
 
@@ -107,9 +107,22 @@
 **Files:**
 - Modify: auto-check wiring (apply the corrector after selection when the Experiment 2 switch is ON; show the correction count on screen), `docs/verification/2026-11-03-transcription-accuracy-baseline.md`, `docs/phase0-checklist.md`
 
-- [ ] **Step 1: Device run.** A–C with Experiment 2 OFF/ON (on top of the Experiment 1 outcome); record C's CER (target ≤5%) and term-error count (target 4 → ≤1), and confirm zero corrector firings on A and B.
-  - Wiring recorded (PR #11): the auto check gained an Experiment 2 switch (`TranscriptionExperiment.evaluateDictionary`); ON applies the corrector per final segment on top of the Experiment 1 selection when both switches are on, displays the OFF/ON CER, term errors and firing count, and logs the `dict=on` line. The device run itself is still outstanding.
-- [ ] **Step 2: Judge by the spec's criteria.** Adopt (possibly reduced to unconditional pairs only) → apply to the live path's final results like Task 5 and register the outcome in ADR-047's follow-up note; reject → record the numbers and stop, per the spec's "both rejected" clause.
+- [x] **Step 1: Device run.** A–C with Experiment 2 OFF/ON (on top of the Experiment 1 outcome); record C's CER (target ≤5%) and term-error count (target 4 → ≤1), and confirm zero corrector firings on A and B.
+  - Wiring recorded (PR #11): the auto check gained an Experiment 2 switch (`TranscriptionExperiment.evaluateDictionary`); ON applies the corrector per final segment on top of the Experiment 1 selection when both switches are on, displays the OFF/ON CER, term errors and firing count, and logs the `dict=on` line.
+  - Recorded (2026-11-05, iPhone 15, TestFlight build #24 (main 891601d, Codemagic build 6aec8758ab17f8deb7530e97), dictionary ON): A — CER OFF 2.44% / ON 2.44%, term errors 0 → 0, dictionary firings 0. B — CER OFF 0.00% / ON 0.00%, term errors 0 → 0, firings 0. C — CER ON 0.00%; the screenshot of the corrected transcript shows all four observed errors （路行装置・ぶどまり・先幅・企画） corrected, so term errors 4 → 0. C's OFF-side numbers were not visible in this run's screenshot and are not recorded here; the dictionary-less C value under identical conditions (same synthesized audio, same settings) is the Experiment 1 run's 8.64%, cited as a reference only — it is not this run's measurement. C's firing count in the log was likewise not captured and is not recorded.
+- [x] **Step 2: Judge by the spec's criteria.** Adopt (possibly reduced to unconditional pairs only) → apply to the live path's final results like Task 5 and register the outcome in ADR-047's follow-up note; reject → record the numbers and stop, per the spec's "both rejected" clause.
+  - Recorded: **adopted** — every criterion is met (term errors 4 → 0, against a target of ≤1; C's CER 0.00%, against ≤5%; zero firings on A and B, so no reduction to unconditional pairs only). The live-path application is Task 8; the outcome is registered in ADR-047's follow-up note and in the baseline document.
+
+### Task 8: Adopt Experiment 2 into the live path (adoption per Task 7's judgment)
+
+**Files:**
+- Modify: `App/PocketAgent/Speech/SpeechCapture.swift` (single-language finals pass through `TermCorrector` via `SpeechCapture.correctFinalText`; firing counts kept as counts only)
+- Modify: `App/PocketAgent/Views/MLXValidationView.swift` (the dictionary switch keeps its OFF/ON comparison and journal format, defaults ON to match the live path, and is labelled as adopted; the 30-second speech test log line gains the live firing count)
+- Create: `App/PocketAgentTests/LiveTermCorrectionTests.swift`
+
+- [x] **Step 1: TDD** for the final-result application point (corrector applied once per final result on the single-language path, volatile untouched), CI GREEN.
+  - Recorded: RED run 42049556248 (temporary PR #13; see the CI line at the top for why RED was re-confirmed off-PR), GREEN run 42044719928 (PR #12, every step successful, including the simulator unit tests with `LiveTermCorrectionTests`).
+- [ ] **Step 2: Device checks.** Real-voice manual check of passage C on the adopted path (no regression outside synthesized speech) and a live-path firing check via the validation screen's speech test. The bilingual path stays uncorrected: it finalizes text in `MeetingSession` through `LanguageArbiter` and shares no finalization point with the single-language path, so its interaction with the dictionary needs its own design. Recorded in docs/phase0-checklist.md.
 
 ---
 
