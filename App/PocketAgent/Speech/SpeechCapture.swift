@@ -255,8 +255,8 @@ final class SpeechCapture: TranscriptSource {
     /// Applies the adopted term dictionary (ADR-047, Experiment 2 adopted in Task 7) to one
     /// final result of the single-language path. The bilingual path finalizes its text in
     /// `MeetingSession` through `LanguageArbiter` and shares no finalization point with this
-    /// path, so bilingual finals are NOT corrected here; that combination needs its own design
-    /// (recorded as unverified in docs/phase0-checklist.md).
+    /// path; bilingual finals are corrected there instead — after the language decision, on
+    /// accepted Japanese candidates only (ADR-048) — through this same entry point.
     nonisolated static func correctFinalText(_ text: String) -> TermCorrector.Outcome {
         TermCorrector.correct(text)
     }
