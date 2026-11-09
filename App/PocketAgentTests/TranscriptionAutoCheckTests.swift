@@ -32,6 +32,40 @@ struct TranscriptionAutoCheckTests {
         }
     }
 
+    // MARK: Experiment series E (ADR-049)
+
+    @Test func experimentResourceNamesMatchThePassages() {
+        #expect(TranscriptionCheckAudio.resourceName(for: .e1) == "passage-e1")
+        #expect(TranscriptionCheckAudio.resourceName(for: .e2) == "passage-e2")
+        #expect(TranscriptionCheckAudio.resourceName(for: .e3) == "passage-e3")
+        #expect(TranscriptionCheckAudio.resourceName(for: .e4) == "passage-e4")
+        #expect(TranscriptionCheckAudio.resourceName(for: .e5) == "passage-e5")
+    }
+
+    @Test func everyExperimentPassageHasBundledAudio() {
+        for passage in ExperimentPassage.allCases {
+            #expect(TranscriptionCheckAudio.encodedData(for: passage) != nil,
+                    "missing bundled audio for \(passage.label)")
+        }
+    }
+
+    @Test func restoredExperimentAudioIsAValid16kMonoWAV() throws {
+        for passage in ExperimentPassage.allCases {
+            let data = try #require(TranscriptionCheckAudio.wavData(for: passage),
+                                    "undecodable bundled audio for \(passage.label)")
+            let format = try #require(Self.wavFormat(data))
+            #expect(format.audioFormat == 1)  // PCM
+            #expect(format.channels == 1)
+            #expect(format.sampleRate == 16000)
+            let seconds = Double(format.dataBytes) / Double(format.sampleRate * format.channels * 2)
+            #expect(seconds > 5 && seconds < 120, "duration \(seconds)s out of range for \(passage.label)")
+            if passage == .e4 {
+                // The long everyday passage: about 300 characters of speech.
+                #expect(seconds > 40, "E4 duration \(seconds)s is too short for its text")
+            }
+        }
+    }
+
     @Test func wavFileRestoreWritesAReadableFile() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptionAutoCheckTests-\(UUID().uuidString)", isDirectory: true)
