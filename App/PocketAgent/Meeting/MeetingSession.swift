@@ -7,7 +7,9 @@ import PocketAgentRuntime
 /// transcript in increments (only while the app is in front), and one journal entry at the end.
 /// Owned by the app, so leaving the tab or locking the phone does not end the recording.
 /// Bilingual (ja/en): a two-language capture's candidates go through `LanguageArbiter`, and each
-/// accepted utterance is translated on device into the other language (best effort).
+/// accepted utterance is translated on device into the other language (best effort). Accepted
+/// Japanese utterances pass through the adopted term dictionary (ADR-047) at that point —
+/// after the language decision, so arbitration always sees the raw recognizer output (ADR-048).
 @MainActor
 @Observable
 final class MeetingSession {
@@ -270,12 +272,24 @@ final class MeetingSession {
         accept(arbiter.drain(now: source.elapsed))
     }
 
+    /// The text an accepted candidate contributes as a segment. Japanese finals go through
+    /// the adopted term dictionary (ADR-047), applied here — after `LanguageArbiter` has
+    /// decided — so the language decision itself always works on the recognizers' raw output
+    /// and arbitration behavior cannot change (ADR-048). Other languages' text is not
+    /// Japanese recognizer output and passes through untouched, as do volatile lane results,
+    /// which never reach this point.
+    static func segmentText(for candidate: LaneCandidate) -> String {
+        guard candidate.language == "ja" else { return candidate.text }
+        return SpeechCapture.correctFinalText(candidate.text).text
+    }
+
     private func accept(_ decisions: [ArbiterDecision]) {
         var added = false
         for decision in decisions {
             for candidate in decision.accepted {
                 let segment = TranscriptSegment(
-                    offset: captureOffset + candidate.start, text: candidate.text, language: candidate.language)
+                    offset: captureOffset + candidate.start, text: Self.segmentText(for: candidate),
+                    language: candidate.language)
                 segments.append(segment)
                 lastLanguage = candidate.language
                 laneVolatile[candidate.language] = nil
