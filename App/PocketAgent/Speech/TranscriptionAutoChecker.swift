@@ -55,6 +55,27 @@ struct TranscriptionAutoChecker {
         } catch {
             throw TranscriptionAutoCheckError.audioUnavailable
         }
+        return try await transcribeSegments(fileURL: fileURL, alternatives: alternatives)
+    }
+
+    /// The experiment series E counterpart (ADR-049): same recognizer
+    /// settings, fed from the frozen passages' bundled audio.
+    func transcribeSegments(
+        experimentPassage: ExperimentPassage, alternatives: Bool
+    ) async throws -> [TranscriptionSegmentCandidates] {
+        let fileURL: URL
+        do {
+            fileURL = try TranscriptionCheckAudio.wavFileURL(
+                for: experimentPassage, directory: TranscriptionCheckAudio.restoreDirectory)
+        } catch {
+            throw TranscriptionAutoCheckError.audioUnavailable
+        }
+        return try await transcribeSegments(fileURL: fileURL, alternatives: alternatives)
+    }
+
+    private func transcribeSegments(
+        fileURL: URL, alternatives: Bool
+    ) async throws -> [TranscriptionSegmentCandidates] {
         // Same locale resolution as the live path (SpeechCapture); the
         // configuration is the preset, or the composed options for the
         // alternatives experiment.
