@@ -10,6 +10,8 @@ struct BilingualGateSection: View {
 
     private struct TranslationRow: Identifiable {
         let id = UUID()
+        /// "Apple" or "PLaMo".
+        let engine: String
         let direction: String
         let source: String
         let output: String
@@ -28,6 +30,7 @@ struct BilingualGateSection: View {
     ]
     static let translationFailedText = "翻訳できませんでした。翻訳データを確認してください。"
     static let downloadFailedText = "翻訳データを入手できませんでした。通信環境を確認して再試行してください。"
+    static let plamoUnavailableText = "PLaMo: 推論ランタイム未統合のため翻訳できません（ADR-050）"
 
     @State private var capture = SpeechCapture(locales: [Locale(identifier: "ja_JP"), SpeechCapture.english])
     @State private var arbiter = LanguageArbiter()
@@ -44,6 +47,8 @@ struct BilingualGateSection: View {
     @State private var translationAverages: [String: Double] = [:]
     @State private var translating = false
     @State private var translationMessage: String?
+    /// Set when any PLaMo row failed; shown as one note instead of the Apple failure text.
+    @State private var plamoFailed = false
 
     private var busy: Bool { expected != nil }
 
@@ -240,9 +245,13 @@ struct BilingualGateSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.source).font(.footnote).foregroundStyle(.secondary)
                     Text(row.output)
-                    Text(row.direction + " " + (row.seconds.map { String(format: "%.1f 秒", $0) } ?? "失敗"))
+                    Text(row.engine + " " + row.direction + " "
+                        + (row.seconds.map { String(format: "%.1f 秒", $0) } ?? "失敗"))
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
+            }
+            if plamoFailed {
+                Text(Self.plamoUnavailableText).font(.footnote).foregroundStyle(.secondary)
             }
             ForEach(translationAverageLines, id: \.self) { line in
                 Text(line).font(.system(.footnote, design: .monospaced))
@@ -265,10 +274,19 @@ struct BilingualGateSection: View {
     }
 
     private var translationAverageLines: [String] {
-        ["ja>en", "en>ja"].compactMap { key in
+        let apple = ["ja>en", "en>ja"].compactMap { key in
             translationAverages[key].map { "翻訳 \(key.replacingOccurrences(of: ">", with: "→")) 平均 " + String(format: "%.1f 秒", $0) }
         }
+        // PLaMo keys exist only for directions with at least one successful translation.
+        let plamo = ["ja>en", "en>ja"].compactMap { key in
+            translationAverages[Self.plamoKeyPrefix + key].map {
+                "翻訳 PLaMo \(key.replacingOccurrences(of: ">", with: "→")) 平均 " + String(format: "%.1f 秒", $0)
+            }
+        }
+        return apple + plamo
     }
+
+    private static let plamoKeyPrefix = "plamo "
 
     /// The view's session only presents the consent sheet; it is used once, here, and never again.
     private struct SessionBox: @unchecked Sendable {
@@ -304,6 +322,7 @@ struct BilingualGateSection: View {
         translationMessage = nil
         translationRows = []
         translationAverages = [:]
+        plamoFailed = false
         Task {
             let translator = AppleTranslator()
             let work = Self.japaneseSentences.map { ("ja", "en", $0) } + Self.englishSentences.map { ("en", "ja", $0) }
@@ -313,22 +332,49 @@ struct BilingualGateSection: View {
                 let started = ContinuousClock.now
                 do {
                     let output = try await translator.translate(text, from: source, to: target)
-                    let elapsed = ContinuousClock.now - started
-                    let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+                    let seconds = Self.seconds(since: started)
                     times[key, default: []].append(seconds)
                     translationRows.append(TranslationRow(
-                        direction: key.replacingOccurrences(of: ">", with: "→"), source: text, output: output, seconds: seconds))
+                        engine: "Apple", direction: key.replacingOccurrences(of: ">", with: "→"), source: text,
+                        output: output, seconds: seconds))
                 } catch {
                     translationMessage = Self.translationFailedText
                     translationRows.append(TranslationRow(
-                        direction: key.replacingOccurrences(of: ">", with: "→"), source: text, output: "—", seconds: nil))
+                        engine: "Apple", direction: key.replacingOccurrences(of: ">", with: "→"), source: text,
+                        output: "—", seconds: nil))
+                }
+            }
+            // The same sentences through PLaMo (ADR-050). Its failures stay out of translationMessage:
+            // until the runtime is integrated every row fails, and one note says why.
+            let plamo = PlamoTranslator()
+            for (source, target, text) in work {
+                let key = source + ">" + target
+                let started = ContinuousClock.now
+                do {
+                    let output = try await plamo.translate(text, from: source, to: target)
+                    let seconds = Self.seconds(since: started)
+                    times[Self.plamoKeyPrefix + key, default: []].append(seconds)
+                    translationRows.append(TranslationRow(
+                        engine: "PLaMo", direction: key.replacingOccurrences(of: ">", with: "→"), source: text,
+                        output: output, seconds: seconds))
+                } catch {
+                    plamoFailed = true
+                    translationRows.append(TranslationRow(
+                        engine: "PLaMo", direction: key.replacingOccurrences(of: ">", with: "→"), source: text,
+                        output: "—", seconds: nil))
                 }
             }
             for (key, values) in times where !values.isEmpty {
                 translationAverages[key] = values.reduce(0, +) / Double(values.count)
             }
             translationAverageLines.forEach { measurementLog.append($0) }
+            if plamoFailed { measurementLog.append(Self.plamoUnavailableText) }
             translating = false
         }
+    }
+
+    private static func seconds(since start: ContinuousClock.Instant) -> Double {
+        let elapsed = ContinuousClock.now - start
+        return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
     }
 }

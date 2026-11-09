@@ -27,6 +27,21 @@ struct MeetingView: View {
     @State private var translationConfig: TranslationSession.Configuration?
     @State private var translationMessage: String?
     @State private var didAttemptAutoStart = false
+    @AppStorage(TranslationEngineChoice.storageKey) private var translationEngineRaw = TranslationEngineChoice.apple.rawValue
+    @Environment(PlamoModelStore.self) private var plamoStore
+
+    private var translationEngine: TranslationEngineChoice {
+        TranslationEngineChoice(rawValue: translationEngineRaw) ?? .apple
+    }
+
+    /// Why a PLaMo meeting has no translation (model first, then the missing runtime, ADR-050).
+    private var plamoUnavailableText: String? {
+        let resolution = TranslationEngineResolver.resolve(
+            choice: .plamo, appleInstalled: false, plamoDownloaded: plamoStore.status == .downloaded,
+            plamoRuntimeAvailable: PlamoRuntimeAvailability.isAvailable)
+        if case let .unavailable(reason) = resolution { return reason.userMessage }
+        return nil
+    }
 
     private var chosenLanguages: [String] {
         language2.isEmpty || language2 == language1 ? [language1] : [language1, language2]
@@ -67,6 +82,7 @@ struct MeetingView: View {
             }
         }
         .task {
+            plamoStore.refresh()
             migrateBilingualSetting()
             meeting.setLanguages(chosenLanguages)
             await meeting.source.refreshAvailability()
@@ -187,6 +203,31 @@ struct MeetingView: View {
 
     @ViewBuilder
     private var translationAvailability: some View {
+        if translationEngine == .plamo {
+            plamoTranslationAvailability
+        } else {
+            appleTranslationAvailability
+        }
+    }
+
+    /// PLaMo has no consent sheet: the model is downloaded from Settings, so no button here.
+    private var plamoTranslationAvailability: some View {
+        VStack(spacing: 8) {
+            let model = plamoStore.status == .downloaded ? "ダウンロード済み" : "未ダウンロード — 設定から入手できます"
+            Text("翻訳: PLaMo 3 Translate（モデル \(model)）")
+                .font(.footnote).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if !PlamoRuntimeAvailability.isAvailable {
+                Text(TranslationEngineResolver.UnavailableReason.plamoRuntimeUnavailable.userMessage
+                    + "。統合までは翻訳なしで会議が進みます。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private var appleTranslationAvailability: some View {
         VStack(spacing: 8) {
             if translationInstalled {
                 Text("翻訳: \(languageNames) 導入済み").font(.footnote).foregroundStyle(.secondary)
@@ -224,7 +265,8 @@ struct MeetingView: View {
             notesCard
                 .padding(.horizontal)
             if meeting.bilingual, meeting.translator == nil {
-                Text(translationMissingText).font(.footnote).foregroundStyle(.secondary)
+                Text(translationEngine == .plamo ? (plamoUnavailableText ?? translationMissingText) : translationMissingText)
+                    .font(.footnote).foregroundStyle(.secondary)
                     .padding(.top, 6)
             }
             Divider().padding(.top, 12)
@@ -468,8 +510,18 @@ struct MeetingView: View {
         let current = backend
         modelTask = Task {
             if meeting.bilingual {
-                await refreshTranslation()
-                meeting.translator = translationInstalled ? AppleTranslator() : nil
+                switch translationEngine {
+                case .apple:
+                    await refreshTranslation()
+                    meeting.translator = translationInstalled ? AppleTranslator() : nil
+                case .plamo:
+                    // Never falls back to Apple: without PLaMo the meeting runs untranslated (ADR-050).
+                    plamoStore.refresh()
+                    let resolution = TranslationEngineResolver.resolve(
+                        choice: .plamo, appleInstalled: false, plamoDownloaded: plamoStore.status == .downloaded,
+                        plamoRuntimeAvailable: PlamoRuntimeAvailability.isAvailable)
+                    meeting.translator = resolution == .plamo ? PlamoTranslator() : nil
+                }
             }
             // Recording first; the model (Apple at once, the downloaded one after a load) follows.
             await meeting.start()

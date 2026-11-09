@@ -26,7 +26,23 @@ struct SettingsView: View {
     @State private var appleReason: ModelUnavailableReason?
     @Environment(ModelDownloadFlow.self) private var downloadFlow
     @Environment(JournalDraftStore.self) private var drafts
+    @Environment(PlamoModelStore.self) private var plamoStore
+    @AppStorage(TranslationEngineChoice.storageKey) private var translationEngineRaw = TranslationEngineChoice.apple.rawValue
+    @State private var pendingPlamoDownload: PendingPlamoDownload?
+    @State private var confirmPlamoDelete = false
+    @State private var plamoMessage: String?
+    /// Read once, when the user taps download (as in ModelDownloadFlow).
+    @State private var networkProbe = NetworkCostProbe()
     @State private var erasing = false
+
+    private struct PendingPlamoDownload {
+        let isExpensive: Bool
+        let freeBytes: Int64
+    }
+
+    private var translationEngine: TranslationEngineChoice {
+        TranslationEngineChoice(rawValue: translationEngineRaw) ?? .apple
+    }
 
     var body: some View {
         Form {
@@ -77,6 +93,8 @@ struct SettingsView: View {
             } footer: {
                 Text("記録の要約と会議の要点は、Apple を選んでいて使える端末なら Apple、それ以外はダウンロードモデルで作ります（Claude は使いません）。ダウンロードモデルとAppleは端末内で処理し、外部へ送信しません。チャットで Claude を選んでいるときは、質問に関係する日誌・会議の内容も Anthropic へ送られます。")
             }
+
+            translationSection
 
             Section("検証") {
                 NavigationLink("1往復テスト（実機検証用）") {
@@ -129,6 +147,120 @@ struct SettingsView: View {
                         .accessibilityLabel("選択中")
                 }
             }
+        }
+    }
+
+    private func translationChoiceRow(_ choice: TranslationEngineChoice) -> some View {
+        Button {
+            translationEngineRaw = choice.rawValue
+        } label: {
+            HStack {
+                Text(choice.displayName)
+                Spacer()
+                if translationEngine == choice {
+                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                        .accessibilityLabel("選択中")
+                }
+            }
+        }
+    }
+
+    private var translationSection: some View {
+        Section {
+            translationChoiceRow(.apple)
+            translationChoiceRow(.plamo)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(plamoStore.model.displayName)
+                Text("約 \(ModelDownloadFlow.megabytes(plamoStore.model.fileSizeBytes))・ライセンス: \(plamoStore.model.license)")
+                    .font(.caption).foregroundStyle(.secondary)
+                PlamoModelStatusView(status: plamoStore.status)
+            }
+            switch plamoStore.status {
+            case .notDownloaded, .failed:
+                Button("PLaMo モデルをダウンロード") { preparePlamoDownload() }
+            case .downloading:
+                Button("中断", role: .destructive) {
+                    plamoStore.cancelDownload()
+                    plamoMessage = nil
+                }
+            case .downloaded:
+                Button("PLaMo モデルを削除", role: .destructive) { confirmPlamoDelete = true }
+            }
+            if let plamoMessage {
+                Text(plamoMessage).font(.footnote).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("翻訳エンジン")
+        } footer: {
+            Text("二言語会議の翻訳に使います。どちらも端末内で処理し、外部へ送信しません。PLaMo の推論ランタイムは未統合のため、統合までは PLaMo を選んでも会議の翻訳は付きません（ADR-050）。")
+        }
+        .confirmationDialog(
+            "ダウンロードしますか？",
+            isPresented: Binding(
+                get: { pendingPlamoDownload != nil }, set: { if !$0 { pendingPlamoDownload = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingPlamoDownload
+        ) { pending in
+            Button("ダウンロード") { startPlamoDownload(pending) }
+            Button("キャンセル", role: .cancel) {}
+        } message: { pending in
+            Text(plamoConfirmationText(pending))
+        }
+        .confirmationDialog(
+            "モデルを削除しますか？", isPresented: $confirmPlamoDelete, titleVisibility: .visible
+        ) {
+            Button("削除", role: .destructive) { deletePlamoModel() }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("\(plamoStore.model.displayName) を端末から削除します。")
+        }
+    }
+
+    private func preparePlamoDownload() {
+        plamoMessage = nil
+        // Unreadable free space is treated as zero: refuse rather than fill the disk.
+        pendingPlamoDownload = PendingPlamoDownload(
+            isExpensive: networkProbe.isExpensive, freeBytes: DeviceProbes.freeDiskBytes() ?? 0)
+    }
+
+    private func plamoConfirmationText(_ pending: PendingPlamoDownload) -> String {
+        let model = plamoStore.model
+        var lines = [
+            model.displayName,
+            "約 \(ModelDownloadFlow.megabytes(model.fileSizeBytes))",
+            "ライセンス: \(model.license)",
+            "通信が発生します",
+        ]
+        if pending.isExpensive { lines.append("モバイル通信中です。Wi-Fi の利用を推奨します") }
+        return lines.joined(separator: "\n")
+    }
+
+    private func startPlamoDownload(_ pending: PendingPlamoDownload) {
+        // The user has just confirmed (including the cellular warning), so no second confirmation.
+        switch plamoStore.startDownload(freeBytes: pending.freeBytes, isExpensiveNetwork: false) {
+        case .started:
+            plamoMessage = nil
+            measurementLog.append(
+                "PLaMo モデルダウンロード開始: 約 \(ModelDownloadFlow.megabytes(plamoStore.model.fileSizeBytes))")
+        case let .refusedDiskSpace(requiredBytes):
+            plamoMessage = ModelUnavailableReason.insufficientDiskSpace(requiredBytes: requiredBytes).userMessage
+        case .needsConfirmation:
+            plamoMessage = nil
+        case .busy:
+            plamoMessage = "別のダウンロードが進行中です"
+        }
+    }
+
+    private func deletePlamoModel() {
+        plamoStore.delete()
+        if plamoStore.isDeletionPending {
+            plamoMessage = "ダウンロードの書き込み終了を待ってモデルを削除します。"
+        } else if case .failed = plamoStore.status {
+            plamoMessage = PlamoModelStore.deleteFailedText
+            measurementLog.append("PLaMo モデル削除失敗")
+        } else {
+            plamoMessage = nil
+            measurementLog.append("PLaMo モデル削除")
         }
     }
 
@@ -214,6 +346,7 @@ struct SettingsView: View {
         // If Apple local is already selected but unavailable, the choice is kept as is:
         // switching to Claude silently would send the conversation to the cloud (AT-03).
         mlxStore.refresh()
+        plamoStore.refresh()
         appleReason = availability.appleLocalUnavailableReason()
         do {
             hasKey = try credentials.readAPIKey()?.isEmpty == false
