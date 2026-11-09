@@ -399,6 +399,6 @@
   - 音声は ADR-044 と同じ手順（VOICEVOX ずんだもん ノーマル、speedScale 1.0 で合成し 16kHz mono に変換、base64 同梱 `passage-e1`〜`passage-e5`）。自動チェックとは別のボタンで実行する。ログ行は `cer.journal passage=E1 … src=synth` の形で A〜C の系列と混ぜず、辞書 ON 行の形式は A〜C と同じ（`dict=on termerrors=<n> corrections=<n>` 付き）。
   - E3 の文面の扱い: 検討書が罠の例に挙げた「前回の企画を超える反響」「企画外の出し物」は、現行の spec ルールの発動条件（直後が「を超え」「外」）にそのまま一致し、実際に発動することを実装時に確認した。発動 0 を合格条件とする凍結文には入れず、発動条件の近くを通るが発動しない文（企画を出す／企画書／企画会議／企画の価値、「を超える」が企画の直後でない配置）で E3 を構成した。発動する 2 文型は過剰補正の既知候補としてここに記録し、次の辞書改訂（spec ルールの条件の見直し）で扱う。
 - 理由: 辞書が増えるほど（ユーザー辞書などの後続候補を含む）、過剰補正を検知する物差しが先に要る。E 系列は既存の自動チェック基盤の延長で作れ、合成音声の手順（ADR-044）も確立済みだった。
-- 検証: Core `ExperimentPassageTests`（参照文の存在、E1・E2 の対象 4 語と漢数字、E3 に `TermCorrector` を適用しても発動 0・無変更、E4 の長さと用語不在、E5 のカタカナ量）、App `ExperimentCheckTests`（ジャーナル行の形式、E1 の誤認識文が辞書で完全復元されること、E3〜E5 で発動 0）、`TranscriptionAutoCheckTests` の E 系列の音声テスト（同梱・16kHz mono・長さ）。RED: run 42623361004（PR #16、Core package tests が失敗）。GREEN: run は PR #16 の確定後に記入する。実認識の確認は実機のみ（チェックリストの実機確認項目）。
+- 検証: Core `ExperimentPassageTests`（参照文の存在、E1・E2 の対象 4 語と漢数字、E3 に `TermCorrector` を適用しても発動 0・無変更、E4 の長さと用語不在、E5 のカタカナ量）、App `ExperimentCheckTests`（ジャーナル行の形式、E1 の誤認識文が辞書で完全復元されること、E3〜E5 で発動 0）、`TranscriptionAutoCheckTests` の E 系列の音声テスト（同梱・16kHz mono・長さ）。RED: run 42623361004（PR #16、Core package tests が失敗）。GREEN: run 42623836521（PR #16、全ステップ成功）。実認識の確認は実機のみ（チェックリストの実機確認項目）。
 - 影響要件: なし（測定の物差しの追加であり、保存方針は ADR-026 のまま）
 - 状態: 採用
