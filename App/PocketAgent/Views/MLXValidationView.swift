@@ -78,6 +78,12 @@ struct MLXValidationView: View {
     // still measures the raw recognition — the yardstick series.
     @State private var autoDictionary = true
     @State private var autoDictionaryOutcomes: [TranscriptionCheckPassage: TranscriptionDictionaryOutcome] = [:]
+    @State private var eTask: Task<Void, Never>?
+    @State private var eRunningPassage: ExperimentPassage?
+    @State private var eResults: [ExperimentPassage: ExperimentCheckResult] = [:]
+    @State private var eTranscripts: [ExperimentPassage: String] = [:]
+    @State private var eErrors: [ExperimentPassage: String] = [:]
+    @State private var eOutcomes: [ExperimentPassage: ExperimentDictionaryOutcome] = [:]
     @State private var copied = false
     @State private var confirmClear = false
     @State private var clearFailed = false
@@ -610,16 +616,16 @@ struct MLXValidationView: View {
                 LabeledContent("自動チェック", value: "\(autoRunningPassage.label) を実行中…")
             } else {
                 Button("自動チェック") { runAutoCheck() }
-                    .disabled(checkBusy)
+                    .disabled(checkBusy || eRunningPassage != nil)
             }
             Toggle("実験1 代替候補の選び直し", isOn: $autoExperiment)
-                .disabled(checkBusy || autoRunningPassage != nil)
+                .disabled(checkBusy || autoRunningPassage != nil || eRunningPassage != nil)
             if autoExperiment {
                 Text("ON のとき下の CER とテキストは選び直し適用後の値。実験OFF の CER・用語エラー数・候補ヒット数を並べて表示し、測定ログには両方の行（ON は alt=on 付き）を残す。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Toggle("用語辞書の後処理（本採用）", isOn: $autoDictionary)
-                .disabled(checkBusy || autoRunningPassage != nil)
+                .disabled(checkBusy || autoRunningPassage != nil || eRunningPassage != nil)
             if autoDictionary {
                 Text("用語辞書は単言語の実経路に本採用済み（ADR-047）。ON（既定）のとき下の CER とテキストは実経路と同じ辞書補正後の値（実験1 も ON のときは選び直しの上に重ねる）。OFF にすると生の認識結果を測れる（物差しの系列はそちらで維持）。辞書OFF の CER・用語エラー数・補正の発動回数を並べて表示し、測定ログには両方の行（ON は dict=on 付き）を残す。A・B で発動したら過剰補正の兆候。")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -643,6 +649,38 @@ struct MLXValidationView: View {
                     LabeledContent("\(passage.label) 辞書OFF CER", value: String(format: "%.2f%%", outcome.offResult.cer * 100))
                     LabeledContent("\(passage.label) 用語エラー（辞書）", value: "OFF \(outcome.offTermErrorCount) → ON \(outcome.onTermErrorCount)")
                     LabeledContent("\(passage.label) 辞書発動", value: "\(outcome.correctionCount)")
+                }
+            }
+            Divider()
+            Text("実験系列 E（ADR-049）: 辞書を作るときに見ていない未見の文（E1・E2）と、過剰補正を誘う罠の文（E3）、長めの日常文（E4）、固有名詞とカタカナの多い文（E5）。A〜C の物差しとは別系列で、文面は凍結済み。以後の辞書変更では文面を変えず、E の CER と辞書発動件数だけを見る。表示の CER は辞書 ON（実経路と同じ標準構成）で、辞書OFF の CER・用語エラー数・発動回数を並べ、測定ログには両方の行（passage=E1…、ON は dict=on 付き）を残す。")
+                .font(.footnote).foregroundStyle(.secondary)
+            if let eRunningPassage {
+                LabeledContent("実験系列 E", value: "\(eRunningPassage.label) を実行中…")
+            } else {
+                Button("実験系列 E を実行") { runExperimentCheck() }
+                    .disabled(checkBusy || autoRunningPassage != nil)
+            }
+            ForEach(ExperimentPassage.allCases, id: \.self) { passage in
+                if let result = eResults[passage] {
+                    LabeledContent("\(passage.label) CER", value: String(format: "%.2f%%", result.cer * 100))
+                }
+                if let error = eErrors[passage] {
+                    Text("\(passage.label): \(error)").font(.footnote).foregroundStyle(.red)
+                }
+                if let transcript = eTranscripts[passage] {
+                    Text(transcript).font(.footnote).textSelection(.enabled)
+                }
+                if let outcome = eOutcomes[passage] {
+                    LabeledContent("\(passage.label) 辞書OFF CER", value: String(format: "%.2f%%", outcome.offResult.cer * 100))
+                    LabeledContent("\(passage.label) 用語エラー（辞書）", value: "OFF \(outcome.offTermErrorCount) → ON \(outcome.onTermErrorCount)")
+                    if passage.isTrapPassage, outcome.correctionCount > 0 {
+                        LabeledContent("\(passage.label) 辞書発動", value: "\(outcome.correctionCount)")
+                            .foregroundStyle(.red)
+                        Text("罠の文で辞書が発動しました（過剰補正）。E3 の合格条件は発動 0 です。")
+                            .font(.footnote).foregroundStyle(.red)
+                    } else {
+                        LabeledContent("\(passage.label) 辞書発動", value: "\(outcome.correctionCount)")
+                    }
                 }
             }
         }
@@ -765,6 +803,46 @@ struct MLXValidationView: View {
             }
             autoRunningPassage = nil
             autoTask = nil
+        }
+    }
+
+    /// Runs the frozen experiment series E (E1→E5) through the standard
+    /// configuration and scores each passage both ways under the term
+    /// dictionary (ADR-049). Both journal lines are logged per passage
+    /// (`passage=E1` ids, so the series never mixes with A–C); the
+    /// transcripts stay on screen. The headline numbers are the CER pair
+    /// and the dictionary firing count — on the trap passage E3 any firing
+    /// is over-correction and is shown in red above.
+    private func runExperimentCheck() {
+        eTask?.cancel()
+        eResults = [:]
+        eTranscripts = [:]
+        eErrors = [:]
+        eOutcomes = [:]
+        let checker = TranscriptionAutoChecker()
+        eTask = Task {
+            for passage in ExperimentPassage.allCases {
+                eRunningPassage = passage
+                do {
+                    let segments = try await checker.transcribeSegments(
+                        experimentPassage: passage, alternatives: false)
+                    if let outcome = ExperimentCheck.evaluateDictionary(passage: passage, segments: segments) {
+                        eOutcomes[passage] = outcome
+                        eResults[passage] = outcome.onResult
+                        eTranscripts[passage] = outcome.onTranscript
+                        measurementLog.append(outcome.offLogLine)
+                        measurementLog.append(outcome.onLogLine)
+                    } else {
+                        eErrors[passage] = "採点できませんでした。"
+                    }
+                } catch let error as TranscriptionAutoCheckError {
+                    eErrors[passage] = error.userMessage
+                } catch {
+                    eErrors[passage] = TranscriptionAutoCheckError.recognitionFailed.userMessage
+                }
+            }
+            eRunningPassage = nil
+            eTask = nil
         }
     }
 

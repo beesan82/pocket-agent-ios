@@ -313,3 +313,13 @@
 - [ ] 本採用後の実経路で、手動チェック（実声）の C を 1 回測り、実声で退行が無いことを確認する
 - [ ] 実経路（日誌の音声入力・単言語会議）で辞書が発動すること（検証画面の 30 秒テストのログ行に用語補正の件数が出ること）
 - [ ] 二言語会議で日本語の専門用語が補正されること（ADR-048 の適用後）: 二言語（日本語＋英語）会議を開き、固定文 C 相当を日本語で話してセグメントが補正済み（露光装置・歩留まり・線幅・規格）で出ること、英語の発話が無変更で出ること、翻訳が補正済みテキストから作られることを目視する
+
+## 検証文の実験系列 E（ADR-049）
+根拠: docs/improvement-analysis-2026-11-09.md 候補 2 / 記録: docs/verification/2026-11-03-transcription-accuracy-baseline.md の実験系列 E の節
+
+### 実装済み（CI で自動テスト合格）
+- [x] Core の実験系列 E（`ExperimentPassage` E1〜E5: 未見の専門用語文 2、罠の文 1、約 300 字の日常文 1、固有名詞・カタカナ文 1）。文面は 2026-11-09 に凍結し、以後の辞書変更では変えない（辞書変更後は E の発動件数と CER を見るだけ）— Core `ExperimentPassageTests`（対象 4 語と漢数字、E3 が `TermCorrector` で発動 0・無変更、E4 の長さと用語不在、E5 のカタカナ量）
+- [x] E 系列の合成音声（VOICEVOX、ADR-044 と同じ手順）の base64 同梱と、検証画面の「実験系列 E を実行」（文ごとの CER・辞書 OFF/ON・用語エラー数・辞書発動件数の表示、E3 は発動時に警告色、測定ログは `cer.journal passage=E1 … src=synth` の行で A〜C と混ぜない）— App `ExperimentCheckTests`（ジャーナル行の形式、E1 の誤認識文の完全復元、E3〜E5 で発動 0）と `TranscriptionAutoCheckTests` の E 系列の音声テスト
+
+### 実機で未検証（iPhone 15、手順: docs/verification/2026-11-03-transcription-accuracy-baseline.md の実験系列 E の手順）
+- [ ] 実験系列 E の初回測定: 検証画面で E を実行し、E1〜E5 の CER（辞書 ON/OFF）・用語エラー数・辞書発動件数をベースライン文書の実験系列 E の記録表に書く。E3 は発動 0 が合格条件
