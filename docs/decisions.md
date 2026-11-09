@@ -402,3 +402,20 @@
 - 検証: Core `ExperimentPassageTests`（参照文の存在、E1・E2 の対象 4 語と漢数字、E3 に `TermCorrector` を適用しても発動 0・無変更、E4 の長さと用語不在、E5 のカタカナ量）、App `ExperimentCheckTests`（ジャーナル行の形式、E1 の誤認識文が辞書で完全復元されること、E3〜E5 で発動 0）、`TranscriptionAutoCheckTests` の E 系列の音声テスト（同梱・16kHz mono・長さ）。RED: run 42623361004（PR #16、Core package tests が失敗）。GREEN: run 42623836521（PR #16、全ステップ成功）。実認識の確認は実機のみ（チェックリストの実機確認項目）。
 - 影響要件: なし（測定の物差しの追加であり、保存方針は ADR-026 のまま）
 - 状態: 採用
+
+## ADR-050 翻訳エンジンを選択式にし、PLaMo 3 Translate を第 2 エンジンとして追加する（推論ランタイムは未統合）
+- 決定:
+  - 二言語会議の翻訳エンジンを選択式にする（設定の「翻訳エンジン」節。Core の `TranslationEngineChoice`、UserDefaults キー `translation.engine`、既定は Apple Translation）。第 2 エンジンとして PFN の PLaMo 3 Translate 0.8B（`pfnet/plamo-3-translate-0.8b-GGUF` の `plamo-3-translate-0.8b-Q4_K_M.gguf`、revision `1cf96ae02133958a20074bfdfab76517bb737d00`、573,126,848 バイト）を追加する。
+  - 今回の実装範囲はプロトコル境界まで: 選択 UI・切替、GGUF のダウンロード状態管理（`PlamoModelStore`。容量 1.5 倍・モバイル通信の確認・1 本ずつ・中断／削除の意味論は `MLXModelStore` と同じ）、PFML3 プロンプト構築（Core の `PlamoPrompt`）、比較画面（検証画面の「翻訳テスト」で同じ 6 文を Apple と PLaMo の両方で訳す）。実推論は `PlamoInferenceEngine` プロトコルの奥に置き、既定実装 `UnavailablePlamoEngine` は常に「ランタイム未統合」エラーを返す。
+  - エンジンの解決は Core の `TranslationEngineResolver` が行い、選んだエンジンが使えないときに他方へ黙って切り替えない。`PlamoRuntimeAvailability.isAvailable = false` の間は、PLaMo を選ぶと `plamoRuntimeUnavailable` となり、会議は翻訳なしで進む（従来の「翻訳データ未導入なら翻訳なし」と同じ扱い）。会議画面と設定のフッターにその旨を明示する。
+- ランタイム選定の検討:
+  - MLX: PFN 公式の MLX-4bit 重みは `model_type=plamo3` のカスタムアーキテクチャで、config は `architectures=[Plamo3ForCausalLM]`・custom_code。採用中の mlx-swift-lm 3.32.3 の `LLMTypeRegistry`（52 種）に plamo 系の登録が無く、リポジトリ内のコード検索でも plamo の実装が無いことを確認し、棄却。
+  - GGUF + llama.cpp: VM 上の llama.cpp b12224 で GGUF Q4_K_M の実動作は検証済み。ただし公式最新リリース v0.9.0 の資産は `nightly-tag.txt` のみで iOS XCFramework が無く、サードパーティ製 SPM ラッパー（pgorzelany/swift-llama-cpp 等）は上流がシミュレータスライスの同梱をやめたため、CI のシミュレータ単体テストと両立せず見送り。
+  - 残る選択肢: (a) llama.cpp を CI でソースから XCFramework ビルドする、(b) mlx-swift-lm へ plamo3 を移植する、(c) ラッパーのシミュレータ対応を待つ。ダウンロード済みの GGUF は (a)(c) でそのまま使える。
+- プロンプト形式: PFML3（GGUF の chat_template と同じ）。`<|plamo:tag|>dataset<|plamo:msg|>translation<|plamo:tag|>input<|plamo:key|>lang<|plamo:val|>{src}<|plamo:msg|>{text}<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>{tgt}<|plamo:msg|>`。BOS はトークナイザが付けるため文字列に含めない。言語コードは小文字に正規化し `^[a-z]{2,3}(-[a-z]{4})?$` のみ受け付ける。停止マーカーは `<|plamo:tag|>` と `<|plamo:bos|>` で、出力は最初のマーカーで切って前後の空白を除く。原文が空白のみ、または `<|plamo:` を含む文は無効（テンプレートが拒否するため、エンジンへ渡さず `invalidInput`）。原文の前後空白はそのまま渡す。
+- メモリ注意: ランタイム統合時は、PLaMo を文字起こし・要点モデルと同時常駐させない。翻訳は文単位の短命処理なので「ロード→生成→解放」を基本とし、会議中は要点モデルとの同時ロードを避ける設計にする。
+- 用語集: PFML3 は glossary 記法を持つが、今回は使わない（将来拡張。ADR-047 / ADR-048 の用語辞書との関係は統合時に設計する）。
+- ライセンス: PLaMo Community License。個人・非商用の利用は無償・事前登録不要、商用利用は事前登録が必要なため、M5 の権利確認リストへ追加した。ダウンロード確認ダイアログにライセンス名・サイズ（約 573 MB）・通信の発生（モバイル通信時は Wi-Fi 推奨）を表示する。
+- 検証: Core `TranslationEngineTests`（`TranslationEngineChoiceTests` / `PlamoPromptTests` / `TranslationEngineResolverTests`: 表示名・保存キー・rawValue の往復、日→英プロンプトの完全一致、言語コードの小文字化、空文字・空白のみ・`<|plamo:` 混入・不正な言語コードで nil、原文の前後空白の保持、停止マーカーでの切り取りと trim、Resolver の全分岐）、App `PlamoTranslatorTests`（プロンプトの受け渡し、停止マーカー以降の除去、`invalidInput` ではエンジンを呼ばないこと、既定エンジンで `runtimeUnavailable`）、App `PlamoModelStoreTests`（容量不足の拒否、モバイル通信の確認要求、成功→ダウンロード済み、失敗文、中断→未ダウンロード、削除、ディレクトリ配置、`HubPlamoDownloader.isDownloaded` のサイズ一致判定、シミュレータでのダウンロード拒否）。検証: （CI run は追記予定）。実機での切替・ダウンロード・比較画面は未確認（チェックリストの実機確認項目）。
+- 影響要件: FR-15
+- 状態: 採用（実機未検証、ランタイム未統合）
