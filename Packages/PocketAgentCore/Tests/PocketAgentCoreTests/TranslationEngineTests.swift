@@ -108,6 +108,6 @@ struct TranslationEngineResolverTests {
         #expect(TranslationEngineResolver.UnavailableReason.applePairNotInstalled.userMessage == "翻訳データが未導入です")
         #expect(TranslationEngineResolver.UnavailableReason.plamoModelNotDownloaded.userMessage.contains("設定からダウンロード"))
         #expect(TranslationEngineResolver.UnavailableReason.plamoRuntimeUnavailable.userMessage
-            == "PLaMo 3 Translate の推論ランタイムは未統合です（ADR-050）")
+            == "PLaMo 3 Translate の推論ランタイムが利用できません")
     }
 }

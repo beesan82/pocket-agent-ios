@@ -53,18 +53,20 @@ struct PlamoTranslatorTests {
         #expect(engine.prompts.isEmpty)
     }
 
-    @Test func defaultEngineReportsMissingRuntime() async {
+    @Test func defaultEngineReportsMissingModel() async {
+        // No model is ever downloaded in the test environment (ADR-051).
         let translator = PlamoTranslator()
 
-        await #expect(throws: PlamoTranslatorError.runtimeUnavailable) {
+        await #expect(throws: PlamoTranslatorError.modelNotDownloaded) {
             try await translator.translate("こんにちは", from: "ja", to: "en")
         }
-        #expect(PlamoRuntimeAvailability.isAvailable == false)
+        #expect(PlamoRuntimeAvailability.isAvailable == true)
     }
 
     @Test func errorMessages() {
         #expect(PlamoTranslatorError.invalidInput.userMessage == "翻訳できない文です")
-        #expect(PlamoTranslatorError.runtimeUnavailable.userMessage
-            == TranslationEngineResolver.UnavailableReason.plamoRuntimeUnavailable.userMessage)
+        #expect(PlamoTranslatorError.modelNotDownloaded.userMessage
+            == TranslationEngineResolver.UnavailableReason.plamoModelNotDownloaded.userMessage)
+        #expect(PlamoTranslatorError.inferenceFailed.userMessage == "PLaMo 3 Translate で翻訳できませんでした")
     }
 }
