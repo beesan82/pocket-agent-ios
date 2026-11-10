@@ -76,6 +76,8 @@ targets:
         product: HuggingFace
       - package: swift-transformers
         product: Tokenizers
+      - framework: Vendor/llama.xcframework
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beesan82.pocketagent

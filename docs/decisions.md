@@ -419,3 +419,16 @@
 - 検証: Core `TranslationEngineTests`（`TranslationEngineChoiceTests` / `PlamoPromptTests` / `TranslationEngineResolverTests`: 表示名・保存キー・rawValue の往復、日→英プロンプトの完全一致、言語コードの小文字化、空文字・空白のみ・`<|plamo:` 混入・不正な言語コードで nil、原文の前後空白の保持、停止マーカーでの切り取りと trim、Resolver の全分岐）、App `PlamoTranslatorTests`（プロンプトの受け渡し、停止マーカー以降の除去、`invalidInput` ではエンジンを呼ばないこと、既定エンジンで `runtimeUnavailable`）、App `PlamoModelStoreTests`（容量不足の拒否、モバイル通信の確認要求、成功→ダウンロード済み、失敗文、中断→未ダウンロード、削除、ディレクトリ配置、`HubPlamoDownloader.isDownloaded` のサイズ一致判定、シミュレータでのダウンロード拒否）。RED: run 42639294651（PR #17、テストのみのコミットで Core package tests のみ失敗）。GREEN: run 42640794803（PR #17、全ステップ成功）。実機での切替・ダウンロード・比較画面は未確認（チェックリストの実機確認項目）。
 - 影響要件: FR-15
 - 状態: 採用（実機未検証、ランタイム未統合）
+
+## ADR-051 PLaMo 3 Translate の推論ランタイムとして llama.cpp を XCFramework 化して統合する
+- 決定:
+  - ADR-050 の残りの選択肢 (a) を採用する。llama.cpp **b12224**（VM で GGUF Q4_K_M の実動作を検証済みの系統。タグは `ci/build-llama-xcframework.sh` にピン留め）を、上流の `build-xcframework.sh ios-device ios-sim` で XCFramework 化し、`Vendor/llama.xcframework` としてアプリにリンクする（動的フレームワークなので embed する）。
+  - バイナリはリポジトリにコミットしない。CI（GitHub Actions）は「llama.cpp のバージョン＋ビルドスクリプトのハッシュ」をキーにキャッシュし、Codemagic も同じスクリプトとキャッシュパスで揃える。生成は冪等で、スタンプファイル（`Vendor/.llama-xcframework-version`）が一致すれば再ビルドしない。GitHub Actions のタイムアウトは初回ビルドを見込んで 60 分に延ばした。
+  - `PlamoInferenceEngine` の実実装 `LlamaCppPlamoEngine` を追加し、`PlamoTranslator` の既定エンジンにする。`PlamoRuntimeAvailability.isAvailable = true` に反転し、会議・比較画面はそのまま一貫して有効化される。`UnavailablePlamoEngine` と `PlamoTranslatorError.runtimeUnavailable` は廃止し、エラーは `modelNotDownloaded`（ファイルなし）と `inferenceFailed`（ロード／生成の失敗）に分ける。Core の `plamoRuntimeUnavailable` の文言は「利用できません」に更新した（resolve の分岐は残すが、実運用では到達しない）。
+  - 生成は 1 呼び出しごとに「ロード→生成→解放」を完結させる（ADR-050 のメモリ規律）。llama のオブジェクトはスレッド安全でないため、エンジン内の serial queue で直列化する。実機では Metal に全レイヤーをオフロードし（`n_gpu_layers = 99`）、シミュレータでは CPU のままにする。
+- サンプリング: greedy（temperature 0）。VM の llama-server 検証（`translate.py`）と同じ構成で、訳文の再現性と安定性を優先する。最大生成は 1024 トークン（同検証と同じ）。コンテキストは 2048 で、生成上限は「2048 − プロンプトのトークン数」との小さい方にする（窓を超えて decode が失敗するのを避ける）。停止は EOG と PFML3 の停止マーカー（`<|plamo:tag|>` / `<|plamo:bos|>` を特殊トークンとしてトークナイズした ID）で判定し、テキスト側の切り取り（`PlamoPrompt.cleanedOutput`）と二重に効かせる。
+- 検証範囲の線引き: CI では両スライスのコンパイル／リンク成立と、モデルファイルなし／破損ファイルでのエラー表面化を保証する。573 MB の GGUF を CI で落として実推論はしない。実モデルでの推論は、ファイルが存在する場合だけ走る統合テスト（実機・手元用。CI では素通り）を用意した。モデル＋プロンプト自体の正しさは VM の llama.cpp 実績（英日・日英・日中を確認済み）が基準で、iOS 側の出力の一致は実機未検証。
+- 用語集: 引き続きスコープ外（ADR-050 の将来拡張のまま）。
+- 検証: Core `TranslationEngineTests`（`plamoRuntimeUnavailable` の文言更新）、App `PlamoTranslatorTests`（既定エンジンが未ダウンロードで `modelNotDownloaded`、`isAvailable = true`、エラーメッセージ）、App `LlamaCppPlamoEngineTests`（未ダウンロード／破損ファイルのエラー、既定 URL がストア配置と一致、実モデルがある場合のみ翻訳スモーク）。RED: run 42833220901（PR #18、テストのみのコミットで Core package tests が失敗）。
+- 影響要件: FR-15
+- 状態: 採用（実機未検証）
