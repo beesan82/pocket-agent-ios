@@ -89,7 +89,9 @@ final class MLXModelStore {
     static let downloadFailedText = "モデルをダウンロードできませんでした。通信状態を確認して、もう一度お試しください。"
     static let deleteFailedText = "モデルを削除できませんでした。"
 
-    static var baseDirectory: URL {
+    /// Pure derivation from `URL.applicationSupportDirectory`; touches no actor state, so
+    /// nonisolated code (LlamaCppPlamoEngine.defaultModelURL, ADR-051) may read it directly.
+    nonisolated static var baseDirectory: URL {
         URL.applicationSupportDirectory.appending(path: "Models", directoryHint: .isDirectory)
     }
 
