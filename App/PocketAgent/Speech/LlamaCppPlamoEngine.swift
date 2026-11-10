@@ -74,9 +74,8 @@ final class LlamaCppPlamoEngine: PlamoInferenceEngine, @unchecked Sendable {
         }
         defer { llama_free(context) }
 
-        let prefill = promptTokens.withUnsafeMutableBufferPointer { buffer in
-            llama_decode(context, llama_batch_get_one(buffer.baseAddress, Int32(buffer.count)))
-        }
+        let prefill = llama_decode(
+            context, llama_batch_get_one(&promptTokens, Int32(promptTokens.count)))
         guard prefill == 0 else { throw PlamoTranslatorError.inferenceFailed }
 
         // Greedy (temperature 0), the configuration verified on the VM.
@@ -117,9 +116,8 @@ final class LlamaCppPlamoEngine: PlamoInferenceEngine, @unchecked Sendable {
         let capacity = Int(needed < 0 ? -needed : needed)
         guard capacity > 0 else { return [] }
         var tokens = [llama_token](repeating: 0, count: capacity)
-        let count = tokens.withUnsafeMutableBufferPointer { buffer in
-            llama_tokenize(vocab, text, length, buffer.baseAddress, Int32(buffer.count), addSpecial, true)
-        }
+        let count = llama_tokenize(
+            vocab, text, length, &tokens, Int32(tokens.count), addSpecial, true)
         guard count >= 0 else { throw PlamoTranslatorError.inferenceFailed }
         return Array(tokens.prefix(Int(count)))
     }
@@ -137,6 +135,6 @@ final class LlamaCppPlamoEngine: PlamoInferenceEngine, @unchecked Sendable {
             }
         }
         guard written > 0 else { return Data() }
-        return buffer.prefix(Int(written)).withUnsafeBytes { Data($0) }
+        return Data(buffer.prefix(Int(written)).map { UInt8(bitPattern: $0) })
     }
 }
