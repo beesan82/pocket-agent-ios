@@ -7,6 +7,8 @@ struct PocketAgentApp: App {
     @State private var settings: ModelSettings
     @State private var mlxStore: MLXModelStore
     @State private var mlxRuntime: MLXRuntime
+    /// The PLaMo translation model (ADR-050), shared by Settings and the meeting screen.
+    @State private var plamoStore: PlamoModelStore
     @State private var container: ModelContainer?
     /// The one journal store for the app (a second instance could hand out duplicate sequences).
     @State private var journal: SwiftDataJournalStore?
@@ -35,6 +37,7 @@ struct PocketAgentApp: App {
         _mlxStore = State(initialValue: store)
         let runtime = MLXRuntime(store: store)
         _mlxRuntime = State(initialValue: runtime)
+        _plamoStore = State(initialValue: PlamoModelStore())
         let log = MeasurementLog()
         measurementLog = log
         _downloadFlow = State(initialValue: ModelDownloadFlow(store: store, runtime: runtime, measurementLog: log))
@@ -68,6 +71,7 @@ struct PocketAgentApp: App {
                     .modelContainer(container)
                     .environment(downloadFlow)
                     .environment(drafts)
+                    .environment(plamoStore)
                     // The only presenter of the download / delete confirmations.
                     .modelDownloadDialogs(downloadFlow)
                     // Logged once here, not per screen (Settings and the models screen share the flow).
