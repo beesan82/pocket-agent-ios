@@ -192,7 +192,7 @@ struct SettingsView: View {
         } header: {
             Text("翻訳エンジン")
         } footer: {
-            Text("二言語会議の翻訳に使います。どちらも端末内で処理し、外部へ送信しません。PLaMo の推論ランタイムは未統合のため、統合までは PLaMo を選んでも会議の翻訳は付きません（ADR-050）。")
+            Text("二言語会議の翻訳に使います。どちらも端末内で処理し、外部へ送信しません。")
         }
         .confirmationDialog(
             "ダウンロードしますか？",

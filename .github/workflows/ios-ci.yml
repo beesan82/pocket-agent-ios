@@ -33,7 +33,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +46,18 @@ jobs:
       # xcode-27 image lacks the Metal Toolchain (actions/runner-images#14548); MLX compiles .metal files.
       - name: Install Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Restore llama.xcframework cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            Vendor/llama.xcframework
+            Vendor/.llama-xcframework-version
+          key: llama-xcframework-b12224-${{ hashFiles('ci/build-llama-xcframework.sh') }}
+
+      - name: Build llama.xcframework (llama.cpp b12224, ADR-051)
+        if: ${{ !inputs.packages_only }}
+        run: bash ci/build-llama-xcframework.sh
 
       - name: Core package tests
         working-directory: Packages/PocketAgentCore

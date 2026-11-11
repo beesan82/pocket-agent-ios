@@ -75,7 +75,7 @@ public enum TranslationEngineResolver {
             case .plamoModelNotDownloaded:
                 "PLaMo 3 Translate のモデルが未ダウンロードです。設定からダウンロードしてください"
             case .plamoRuntimeUnavailable:
-                "PLaMo 3 Translate の推論ランタイムは未統合です（ADR-050）"
+                "PLaMo 3 Translate の推論ランタイムが利用できません"
             }
         }
     }

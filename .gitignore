@@ -33,3 +33,7 @@ __pycache__/
 Packages/PocketAgentRuntime/Package.resolved
 # superpowers scratch (brainstorm mockups, plan ledgers)
 .superpowers/
+# llama.cpp XCFramework built by ci/build-llama-xcframework.sh (ADR-051); never committed
+/Vendor/
+# Scratch checkout used while building the XCFramework
+/.llama-build/

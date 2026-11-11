@@ -30,7 +30,7 @@ struct BilingualGateSection: View {
     ]
     static let translationFailedText = "翻訳できませんでした。翻訳データを確認してください。"
     static let downloadFailedText = "翻訳データを入手できませんでした。通信環境を確認して再試行してください。"
-    static let plamoUnavailableText = "PLaMo: 推論ランタイム未統合のため翻訳できません（ADR-050）"
+    static let plamoFailedText = "PLaMo: 翻訳に失敗しました"
 
     @State private var capture = SpeechCapture(locales: [Locale(identifier: "ja_JP"), SpeechCapture.english])
     @State private var arbiter = LanguageArbiter()
@@ -251,7 +251,7 @@ struct BilingualGateSection: View {
                 }
             }
             if plamoFailed {
-                Text(Self.plamoUnavailableText).font(.footnote).foregroundStyle(.secondary)
+                Text(Self.plamoFailedText).font(.footnote).foregroundStyle(.secondary)
             }
             ForEach(translationAverageLines, id: \.self) { line in
                 Text(line).font(.system(.footnote, design: .monospaced))
@@ -368,7 +368,7 @@ struct BilingualGateSection: View {
                 translationAverages[key] = values.reduce(0, +) / Double(values.count)
             }
             translationAverageLines.forEach { measurementLog.append($0) }
-            if plamoFailed { measurementLog.append(Self.plamoUnavailableText) }
+            if plamoFailed { measurementLog.append(Self.plamoFailedText) }
             translating = false
         }
     }
