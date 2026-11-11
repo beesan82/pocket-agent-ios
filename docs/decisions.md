@@ -433,3 +433,14 @@
 - 検証の追記（2026-11-11）: ios-ci.yml の変更は所有者が Web UI から直接コミット（969957b）して反映した。その後の run 42919232997（head f252172）で残った失敗は1件のみで、`LlamaCppPlamoEngine.swift:25` の MainActor 分離エラー（非分離の `defaultModelURL()` が @MainActor クラス `MLXModelStore` の `static var baseDirectory` を参照）。修正として `MLXModelStore.baseDirectory` を `nonisolated` 化した（d5f6d56）。同プロパティは `URL.applicationSupportDirectory` からの純粋な導出のみで actor 状態に一切触れないため、これが最小で安全な直し方である。**GREEN: run 42922352418**（head d5f6d56）が全ステップ成功 — llama.xcframework ビルド、Core / Runtime パッケージテスト、シミュレータ／実機向けビルド、シミュレータ単体テストを含む。これで PR #18 の CI はグリーン確定。
 - 影響要件: FR-15
 - 状態: 採用（実機未検証）
+
+## ADR-052 Hub ダウンロードを downloadSnapshot から個別ファイル取得へ切り替える
+- 背景（実機障害 2026-11-11）: TestFlight ビルド 30 で PLaMo モデルのダウンロードが 100% に達した直後に失敗表示となった。原因は swift-huggingface 0.13.0 の `downloadSnapshot` の実装にある: 宛先へのダウンロードと進捗 100% の通知が完了した後、末尾で `guard let cache else { throw HubCacheError.snapshotRequiresCacheOrDestination }` に入り、**キャッシュなしのクライアントでは成功しても必ず throw する**（ピン留めリビジョン f0a0cb4 のソースで確認）。両ダウンローダ（`HubPlamoDownloader` / `HubModelDownloader`）とも `HubClient(cache: nil)` でスナップショットを使っていたため、ファイルは着地しているのに失敗扱いになっていた。アプリ再起動後の `refresh()` で「ダウンロード済み」に転ぶのもこの帰結。
+- 副次的な欠陥: PLaMo の glob `*.gguf` はリポジトリ内の全量子化 4 ファイル（Q2_K / Q3_K_M / Q4_0 / Q4_K_M、計 2,017,194,752 バイト ≒ 2.02 GB）にマッチし、必要な Q4_K_M（573,126,848 バイト）の約 3.5 倍を落としていた。容量チェックと表示文は 573 MB 前提のため不整合だった。
+- 決定:
+  - PLaMo: スナップショットを廃し、ピン留めした 1 ファイルを `HubClient.downloadFile` で最終配置へ直接落とす（`downloadFile` はキャッシュなしでも動作する）。開始前に `prepareForDownload` でディレクトリを整える: 他量子化の GGUF は削除し、サイズ一致の既存ファイルがあれば再ダウンロードせず再利用する（上記の障害で着地済みの端末を救済する）、サイズ不一致のファイルは削除する。
+  - MLX: スナップショットを廃し、`listFiles` で列挙 → 従来 glob と同一の fnmatch 意味論（flags 0）で選択（`selectFiles`）→ `downloadFile` で個別に落とす。進捗は実サイズ（LFS は `effectiveSize`）を重みとする集約 Progress で報告する。
+  - キャッシュを使う案（スナップショットの正規経路）は、モデル本体と同量の二重保管になるため採らない（ADR-050 の「キャッシュなし」方針は維持する。変わるのは取得 API のみ）。
+- 検証: App `PlamoModelStoreTests` に `prepareForDownload` の 3 件（完全な既存ファイルの保持と残骸 GGUF の削除・不完全ファイルの削除・未着地では未完了）、App `MLXModelStoreTests` に `selectFiles` の 2 件（対象拡張子のみ保持・ネストしたパスへの fnmatch 到達）を追加。ネットワーク自体は従来どおり実機検証（チェックリストの PLaMo / MLX のダウンロード項目）。
+- 影響要件: FR-15、モデル管理全般
+- 状態: 採用（実機での再ダウンロード確認待ち）

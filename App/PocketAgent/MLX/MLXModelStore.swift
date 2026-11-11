@@ -29,6 +29,20 @@ struct HubModelDownloader: ModelDownloading {
             .appending(path: model.id, directoryHint: .isDirectory)
     }
 
+    /// One file of a repo listing, as needed for selection and progress weights.
+    struct SnapshotFile: Equatable, Sendable {
+        let path: String
+        let size: Int64
+    }
+
+    /// The files the snapshot download would have fetched: glob-filtered with
+    /// the same fnmatch semantics (flags 0, so "*" also crosses directories).
+    static func selectFiles(_ entries: [SnapshotFile]) -> [SnapshotFile] {
+        entries.filter { entry in
+            globs.contains { fnmatch($0, entry.path, 0) == 0 }
+        }
+    }
+
     func download(
         _ model: MLXModelInfo, to base: URL, progress: @escaping @Sendable (Double) -> Void
     ) async throws {
@@ -43,12 +57,37 @@ struct HubModelDownloader: ModelDownloading {
         try? baseURL.setResourceValues(excluded)
 
         guard let repo = Repo.ID(rawValue: model.id) else { throw MLXModelIDInvalid() }
-        // No cache: files go straight into the model directory (a cache would keep a second copy).
+        // No cache, and no snapshot: the snapshot API of swift-huggingface 0.13.0
+        // throws after a successful download when the client has no cache
+        // (ADR-052). Fetch the same file set file by file instead.
         let hub = HubClient(cache: nil)
-        _ = try await hub.downloadSnapshot(
-            of: repo, kind: .model, to: Self.directory(of: model, at: base), revision: model.revision,
-            matching: Self.globs,
-            progressHandler: { (value: Progress) in progress(value.fractionCompleted) })
+        let directory = Self.directory(of: model, at: base)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let entries = try await hub.listFiles(in: repo, kind: .model, revision: model.revision, recursive: true)
+        let files = Self.selectFiles(entries.filter { $0.type == .file }.map {
+            SnapshotFile(path: $0.path, size: Int64($0.effectiveSize ?? 0))
+        })
+        let totalWeight = files.reduce(Int64(0)) { $0 + max($1.size, 1) }
+        let aggregate = Progress(totalUnitCount: max(totalWeight, 1))
+        // Sampled like the snapshot download did: Progress is thread-safe to read.
+        let sampler = Task {
+            while !Task.isCancelled {
+                progress(aggregate.fractionCompleted)
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        defer { sampler.cancel() }
+        for file in files {
+            let destination = directory.appending(path: file.path)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let child = Progress(
+                totalUnitCount: max(file.size, 1), parent: aggregate, pendingUnitCount: max(file.size, 1))
+            _ = try await hub.downloadFile(
+                at: file.path, from: repo, to: destination,
+                kind: .model, revision: model.revision, progress: child)
+        }
+        progress(1)
         #endif
     }
 
