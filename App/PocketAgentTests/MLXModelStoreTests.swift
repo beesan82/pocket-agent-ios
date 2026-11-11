@@ -489,6 +489,38 @@ struct MLXModelStoreTests {
         #endif
     }
 
+    // MARK: - Snapshot file selection (ADR-052)
+
+    @Test func selectFilesKeepsModelFilesOnly() {
+        let entries = [
+            HubModelDownloader.SnapshotFile(path: "model.safetensors", size: 100),
+            HubModelDownloader.SnapshotFile(path: "config.json", size: 10),
+            HubModelDownloader.SnapshotFile(path: "tokenizer.model", size: 20),
+            HubModelDownloader.SnapshotFile(path: "special_tokens_map.json", size: 5),
+            HubModelDownloader.SnapshotFile(path: "README.md", size: 7),
+            HubModelDownloader.SnapshotFile(path: "weights.gguf", size: 999),
+            HubModelDownloader.SnapshotFile(path: ".gitattributes", size: 3),
+        ]
+
+        let selected = HubModelDownloader.selectFiles(entries)
+
+        #expect(selected.map(\.path) == [
+            "model.safetensors", "config.json", "tokenizer.model", "special_tokens_map.json",
+        ])
+        #expect(selected.reduce(0) { $0 + $1.size } == 135)
+    }
+
+    @Test func selectFilesMatchesNestedPathsLikeTheSnapshotDid() {
+        // The snapshot download matched globs with fnmatch flags 0, where "*"
+        // also crosses directories; keep the same reach so no file is lost.
+        let entries = [
+            HubModelDownloader.SnapshotFile(path: "subdir/config.json", size: 1),
+            HubModelDownloader.SnapshotFile(path: "subdir/notes.md", size: 1),
+        ]
+
+        #expect(HubModelDownloader.selectFiles(entries).map(\.path) == ["subdir/config.json"])
+    }
+
     /// Polls on the main actor; returns false on timeout instead of hanging the suite.
     private func waitUntil(timeout: Duration = .seconds(5), _ condition: () -> Bool) async throws -> Bool {
         let deadline = ContinuousClock.now.advanced(by: timeout)

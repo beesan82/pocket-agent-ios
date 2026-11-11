@@ -33,8 +33,6 @@ protocol PlamoFileDownloading: Sendable {
 
 /// Same layout as the MLX models: `base/models/<repo id>`.
 struct HubPlamoDownloader: PlamoFileDownloading {
-    static let globs = ["*.gguf"]
-
     let model: PlamoModel
 
     init(model: PlamoModel = .translate08B) {
@@ -44,6 +42,26 @@ struct HubPlamoDownloader: PlamoFileDownloading {
     static func directory(of model: PlamoModel, at base: URL) -> URL {
         base.appending(path: "models", directoryHint: .isDirectory)
             .appending(path: model.repoID, directoryHint: .isDirectory)
+    }
+
+    /// Prepares the model directory for a download and reports whether the model
+    /// is already there in full. Removes GGUF files other than the pinned one
+    /// (the pre-fix snapshot download fetched every quantization in the repo,
+    /// about 2.0 GB in total — ADR-052) and a pinned file with the wrong size
+    /// (a partial file would block the move into place).
+    func prepareForDownload(in directory: URL) -> Bool {
+        let fileManager = FileManager.default
+        let names = (try? fileManager.contentsOfDirectory(atPath: directory.path(percentEncoded: false))) ?? []
+        for name in names where name.hasSuffix(".gguf") && name != model.fileName {
+            try? fileManager.removeItem(at: directory.appending(path: name))
+        }
+        let target = directory.appending(path: model.fileName)
+        guard let attributes = try? fileManager.attributesOfItem(atPath: target.path(percentEncoded: false)),
+              let size = attributes[.size] as? NSNumber
+        else { return false }
+        if size.int64Value == model.fileSizeBytes { return true }
+        try? fileManager.removeItem(at: target)
+        return false
     }
 
     func download(to directory: URL, progress: @escaping @Sendable (Double) -> Void) async throws {
@@ -57,13 +75,31 @@ struct HubPlamoDownloader: PlamoFileDownloading {
         var directoryURL = directory
         try? directoryURL.setResourceValues(excluded)
 
+        // The pre-fix snapshot download reported failure after the file had
+        // already landed (ADR-052): reuse a complete file instead of refetching.
+        if prepareForDownload(in: directory) {
+            progress(1)
+            return
+        }
         guard let repo = Repo.ID(rawValue: model.repoID) else { throw MLXModelIDInvalid() }
-        // No cache: the file goes straight into the model directory (a cache would keep a second copy).
+        // No cache, and no snapshot: the snapshot API of swift-huggingface 0.13.0
+        // throws after a successful download when the client has no cache
+        // (ADR-052). Download the one pinned file straight to its final place.
         let hub = HubClient(cache: nil)
-        _ = try await hub.downloadSnapshot(
-            of: repo, kind: .model, to: directory, revision: model.revision,
-            matching: Self.globs,
-            progressHandler: { (value: Progress) in progress(value.fractionCompleted) })
+        let fileProgress = Progress(totalUnitCount: model.fileSizeBytes)
+        // Sampled like the snapshot download did: Progress is thread-safe to read.
+        let sampler = Task {
+            while !Task.isCancelled {
+                progress(fileProgress.fractionCompleted)
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        defer { sampler.cancel() }
+        _ = try await hub.downloadFile(
+            at: model.fileName, from: repo,
+            to: directory.appending(path: model.fileName),
+            kind: .model, revision: model.revision, progress: fileProgress)
+        progress(1)
         #endif
     }
 
