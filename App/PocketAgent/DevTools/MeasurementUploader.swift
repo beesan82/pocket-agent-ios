@@ -59,7 +59,8 @@ struct MeasurementUploader: Sendable {
               let url = URL(string: "https://api.github.com/repos/\(repository)/issues")
         else { return .failed(.invalidRepository) }
 
-        // The log contains spoken text: refuse unless GitHub itself says the repository is private.
+        // The log holds measurements only (counts and timings, no spoken text — ADR-053), but it still
+        // describes the device and its use: refuse unless GitHub itself says the repository is private.
         if let refusal = await checkPrivate(repositoryURL: repositoryURL, token: token) {
             return .failed(refusal)
         }

@@ -215,7 +215,7 @@ struct MLXValidationView: View {
             Text("コピーして、そのままチャットへ貼り付けてください。")
         }
         .confirmationDialog(
-            "\(developer.repository) の非公開 Issue として送信します（\(measurementLog.entries.count) 行、音声テストの内容を含みます）",
+            "\(developer.repository) の非公開 Issue として送信します（\(measurementLog.entries.count) 行。測定値のみで、話した内容や要約の本文は含みません）",
             isPresented: $confirmUpload, titleVisibility: .visible
         ) {
             Button("送信") { Task { await uploadLog() } }
@@ -458,14 +458,10 @@ struct MLXValidationView: View {
                 result = SummaryResult(
                     sampleID: sample.id, output: output, seconds: elapsed, tokensPerSecond: rate)
                 results[sample.id] = result
-                let tokenText = tokens.map { "\($0)" } ?? "不明"
-                let rateText = rate.map { String(format: "%.1f", $0) } ?? "不明"
-                measurementLog.append(
-                    "要約（\(sample.label)・入力\(sample.text.count)字）: 所要 "
-                        + String(format: "%.1f", elapsed)
-                        + " 秒 / 出力 \(tokenText) tokens / \(rateText) tokens/s / 見出し: \(output.title ?? "なし")"
-                        + " / 本文先頭: \(String(output.body.prefix(80)))")
-                measurementLog.append("  > \(output.body)")
+                // Lengths only: the summary stays on screen and never enters the log (ADR-026, ADR-053).
+                measurementLog.append(MeasurementLogLines.summaryResult(
+                    label: sample.label, inputChars: sample.text.count, seconds: elapsed,
+                    outputTokens: tokens, tokensPerSecond: rate, title: output.title, body: output.body))
             case .failure:
                 summaryMessage = "要約を生成できませんでした。モデルを読み込み直してから、もう一度お試しください。"
                 measurementLog.append("要約失敗: \(sample.label)")
@@ -566,9 +562,9 @@ struct MLXValidationView: View {
 
     private func logSpeechResult() {
         speechChars = speech.finalText.count
-        // The correction count is counts-only (ADR-026), like the check journals.
-        measurementLog.append("音声30秒テスト結果: 確定テキスト \(speech.finalText.count) 字 / 用語補正 \(speech.termCorrectionCount) 件")
-        measurementLog.append("  > \(speech.finalText)")
+        // Counts only (ADR-026, ADR-053): the recognized text stays on screen and never enters the log.
+        measurementLog.append(MeasurementLogLines.speechTestResult(
+            finalText: speech.finalText, termCorrectionCount: speech.termCorrectionCount))
     }
 
     // MARK: Transcription check

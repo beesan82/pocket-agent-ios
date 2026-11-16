@@ -2,7 +2,8 @@ import Foundation
 import Observation
 import UIKit
 
-/// Device measurement notes for the MLX validation screens. Lines are fixed Japanese templates with numbers.
+/// Device measurement notes for the MLX validation screens. Lines are fixed Japanese templates with numbers:
+/// counts and timings, never spoken or generated text (ADR-026, ADR-053; see `MeasurementLogLines`).
 /// Appending is best effort; clearing reports disk errors so callers never claim a failed deletion succeeded.
 @MainActor
 @Observable
@@ -29,7 +30,10 @@ final class MeasurementLog {
         self.fileURL = fileURL
         self.now = now
         self.removeItem = removeItem
-        entries = Self.load(from: fileURL)
+        let loaded = Self.load(from: fileURL)
+        // Builds before ADR-053 logged recognized text and summary bodies: drop those lines for good.
+        entries = loaded.filter { !MeasurementLogLines.isLegacyContentLine($0.line) }
+        if entries.count != loaded.count { save() }
     }
 
     func append(_ line: String) {
@@ -79,8 +83,8 @@ final class MeasurementLog {
         try? FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? text.write(to: fileURL, atomically: true, encoding: .utf8)
-        // The log can hold what was said in voice tests: keep it out of backups. Set after every
-        // write because an atomic write replaces the file.
+        // Measurements only (no spoken text), but still device-local: keep it out of backups.
+        // Set after every write because an atomic write replaces the file.
         var url = fileURL
         var values = URLResourceValues()
         values.isExcludedFromBackup = true

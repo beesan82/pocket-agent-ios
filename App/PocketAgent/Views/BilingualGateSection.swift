@@ -216,11 +216,10 @@ struct BilingualGateSection: View {
         results[language] = stats
         stats.lines.forEach { measurementLog.append($0) }
         for decision in decisions {
-            let shown = decision.accepted.map(\.text).joined(separator: " ")
-            let dropped = decision.rejected.map { "\($0.language):\($0.text)" }.joined(separator: " / ")
-            measurementLog.append(
-                "  [\(decision.language ?? "-") \(Self.label(decision.reason))] \(shown) \(Self.score(decision.accepted))"
-                    + (dropped.isEmpty ? "" : " ✕ \(dropped)"))
+            // Lengths only: what was said never enters the log (ADR-026, ADR-053).
+            measurementLog.append(MeasurementLogLines.bilingualDecision(
+                language: decision.language, reasonLabel: Self.label(decision.reason),
+                score: Self.score(decision.accepted), accepted: decision.accepted, rejected: decision.rejected))
         }
         expected = nil
         runTask = nil

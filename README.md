@@ -1,6 +1,6 @@
-# Pocket Agent（仮称）
+# ポケット執事（開発名 Pocket Agent）
 
-iPhone 完結型マルチモデル AI エージェント。要件は [AGENT_REQUIREMENTS.md](AGENT_REQUIREMENTS.md)、設計は [docs/architecture.md](docs/architecture.md)、決定の記録は [docs/decisions.md](docs/decisions.md)。
+機微情報（会話・メモ・日誌・会議の文字起こし）を iPhone の中に閉じ込める「金庫」と、その中で働く端末内エージェント（執事）。開発の舵は文字起こしの性能（[AGENT_REQUIREMENTS.md](AGENT_REQUIREMENTS.md) 第0章）。正式名称は「ポケット執事」（ADR-045）で、アプリの表示名とリポジトリ名は開発名のまま。要件は [AGENT_REQUIREMENTS.md](AGENT_REQUIREMENTS.md)、設計は [docs/architecture.md](docs/architecture.md)、決定の記録は [docs/decisions.md](docs/decisions.md)。
 作業の決まり（CI、TDD、push の扱い）は [AGENTS.md](AGENTS.md)。
 
 ## 現在の状態
