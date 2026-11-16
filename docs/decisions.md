@@ -7,6 +7,7 @@
 - 理由: Windows で pbxproj を手編集するのは事実上不可能。YAML なら差分レビューも容易（要件3.1「プロジェクト生成」）。
 - リスク: CI の `brew install xcodegen` はバージョン非固定。問題が出たら mint 等でピン留めする。
 - 状態: 採用（CI 未実行）
+  - 注記（2026-11-17、ADR-053）: 「CI 未実行」は起票時点の記述。現在は CI が稼働しており、XcodeGen によるプロジェクト生成は毎回の実行に含まれる（`AGENTS.md` の CI の流れ。記録上の直近の全ステップ成功は ADR-051 の run 42922352418）。
 
 ## ADR-002 AgentRunKit を exact 6.1.0 に固定
 - 決定: `exactVersion: 6.1.0`。tag `v6.1.0` の commit は `a7ac823ca42d4ecff386a83c10a44a97bd391cdb`（2026-10-18 GitHub API で確認）。
@@ -22,6 +23,7 @@
 - 決定: `https://line.me/R/share?text=` の値を `A-Z a-z 0-9 - . _ ~` 以外すべてエンコードし、`URLComponents.percentEncodedQueryItems` に設定する。
 - 理由: `URLComponents.queryItems` は `+` などをエンコードしないため、受信側で空白に化ける可能性がある（要件9.1、AT-06）。
 - 状態: 実装済み・ユニットテストあり（CI 未実行）
+  - 注記（2026-11-17、ADR-053）: 「CI 未実行」は起票時点の記述。現在は CI が稼働しており、Core の `LineShareURLBuilderTests` は毎回のパッケージテストで実行される。実機での画面遷移は未検証のまま（ADR-016）。
 
 ## ADR-005 最低 OS は iOS 26.0
 - 決定: deployment target iOS 26.0（要件3.2）。AgentRunKit 自体は iOS 18+ だが FoundationModelsClient は iOS 26+。
@@ -31,6 +33,7 @@
 - 決定: runner image に同梱の `/Applications/Xcode_26*.app` から最新を `xcode-select` する。
 - 理由: AgentRunKit v6.1.0 は Xcode 26+ 必須。runner の Xcode 構成は変わるため、ログに実際の版を出力して証跡にする。
 - 状態: 採用（未実行。Xcode 26 が見つからなければ CI が明示的に失敗する）
+  - 注記（2026-11-17、ADR-053）: 「未実行」は起票時点の記述。CI は稼働中で、ランナーと Xcode の決定そのものは ADR-030 で置き換えられた（現行は `xcode-27` ランナー、Xcode 27.0 固定）。
 
 ## ADR-007 FakeLLM は自前の `ScriptedLLMClient`、安全ルールは `AgentRunner` に集約
 - 決定: `AgentRunKitTesting.TestLLMClient` は使わず、`LLMClient` に準拠した台本再生型の FakeLLM をテスト側に置く。AgentRunKit の `Agent` は `Packages/PocketAgentRuntime` の `AgentRunner` で包む。
@@ -42,6 +45,7 @@
   - 終了は予約ツール `finish`（引数 `{"content": String, "reason": String?}`）。テキストのみの応答では終了しない（`ContentOnlyTerminatingClient` は package 内部のみ）。
 - 影響要件: FR-04, FR-05, FR-06, AT-05, AT-08, AT-09
 - 状態: 実装済み（CI 未実行）
+  - 注記（2026-11-17、ADR-053）: 「CI 未実行」は起票時点の記述。現在は CI が稼働しており、Runtime の `AgentRunnerTests` ほかは毎回のパッケージテストで実行される。
 
 ## ADR-008 SDK のクライアントは包まずに `AgentRunner` へ渡す
 - 決定: `ClaudeAdapter.makeClient` は `AnthropicClient` をそのまま返し、Apple は `FoundationModelsClient<EmptyContext>` をそのまま使う。選択の判断は Core の `ModelBackendResolver<Backend>`（AgentRunKit 非依存のジェネリック）に置く。
@@ -70,7 +74,8 @@
 ## ADR-011 Claude の既定モデル ID は `claude-sonnet-5-5`
 - 決定: 既定 `claude-sonnet-5-5`、`maxTokens` 1024。設定画面で変更可。
 - 理由: 1往復検証の費用と速度のバランス（筆者の判断。ユーザー未確認）。
-- 状態: 暫定
+- 状態: 暫定（凍結）
+  - 注記（2026-11-17、ADR-053）: 所有者は Claude 経路を使っていない（ADR-042「クラウドは使えない」）。所有者が Claude 経路を使わない間は、この決定を暫定のまま凍結し、製品化の形が決まるまで既定モデル ID と `maxTokens` に触らない。実 API での 1 往復は実機未検証のまま（`docs/phase0-checklist.md` の 0-5）。
 
 ## ADR-012 CI の単体テストはシミュレータ向けアドホック署名で実行
 - 決定: `xcodebuild test` のみ `CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=`（Sign to Run Locally）。`xcodebuild build` は無署名のまま。
@@ -118,7 +123,8 @@
 - 理由: ユーザーが main への push を事前承認済みで、CI は main への push でのみ自動実行される。一時ブランチ案はこの環境では手間が増える。
 - 影響: RED の間 main の CI が一時的に赤くなる（各タスク約 2 回）。コミット履歴に RED が残る。
 - 影響要件: プロセス（CLAUDE.md 開発順序 4）
-- 状態: 採用
+- 状態: 採用 → 置き換え: `AGENTS.md` の現行運用
+  - 注記（2026-11-17、ADR-053）: この決定は現行の運用ではない。`AGENTS.md`「TDD と失敗するコミットの扱い」が置き換えた: 失敗する（RED）コミットを `main` に push しない。失敗の確認は別の worktree の一時ブランチで行い、終わったら消す。通る（GREEN）コミットだけを `main` へ push する（大きめの変更はブランチと pull request）。上の本文は当時の記録として残す。
 
 ## ADR-019 会話履歴にはユーザーとアシスタントのテキストだけを保存（ツール結果は保存しない）
 - 決定: `TurnRecord` は user / assistant のテキストのみ。ツール呼び出しと結果は保存せず、次ターンの履歴にも含めない。
@@ -245,6 +251,7 @@
 - 理由: Windows のみの環境で実機の結果を回収するため。ログには文字起こし本文を入れず、件数などの測定値のみとする。
 - 影響要件: 要件の秘密情報の扱い（CLAUDE.md）、AT-11
 - 状態: 採用（実際の GitHub API に対する送信、トークン権限、private 判定は実機未検証。Issue 送信は成功の確認なし）
+  - 注記（2026-11-17、ADR-053）: 理由欄の「ログには文字起こし本文を入れず、件数などの測定値のみ」に対し、実装は音声 30 秒テストの確定テキスト全文、要約テストの本文、二言語ゲートの発話テキストをログに書いていた。ADR-053 で実装をこの文言に合わせた（字数・件数のみ。以前のビルドが書いた本文行は読み込み時に取り除く）。
 
 ## ADR-031 チャットのダウンロードモデル（`.mlxLocal`）はツールなしの会話のみ。既定モデルにする
 - 決定: `ModelChoice.mlxLocal` を追加し、設定を「クラウド（Claude）／ローカル（端末内: Apple・ダウンロードモデル）」の階層にまとめる。`.mlxLocal` のチャットは resolver と AgentRunner を通らず、`LocalChat` が MLX クライアントへ直接ストリームする（AgentRunKit 6.1.0 の `MLXClient` は `ContentOnlyTerminatingClient` ではないため）。ツール・ToolCapabilityTracker・救済・`toolcall.*` ログは使わない。保存を頼まれたら日誌タブを案内する。resolver は `.mlxLocal` を担当外として `.modelNotDownloaded` で安全側に失敗させ、キーを読まずクライアントも作らない。既定のチャットモデルは `.mlxLocal`（ユーザー判断、2026-10-21）。一度だけの移行で、保存済みの選択が Claude または未設定の場合、API キーがあれば Claude を保存して維持し、なければ `.mlxLocal` にする（フラグ `pocketagent.defaultModelMigrated`）。未ダウンロードなら理由と設定へのリンクを出し、自動ダウンロードはしない。
@@ -316,6 +323,7 @@
 - 検証: `MLXModelStoreTests.registryOffersQwen3_4BInstruct`（CI）。実機の速度・メモリ・ツール呼び出し成功率は未測定（`docs/phase2-mlx-eval.md` の測定 3）。
 - 影響要件: FR-14, FR-15, AT-15
 - 状態: 採用（候補のみ。既定への昇格は測定 3 の結果で判断）
+  - 訂正の注記（2026-11-17、ADR-053）: 理由欄の「測定 2 では 1.5B 読込後に `os_proc_available_memory` が 2972 MB 残っており」は誤り。`docs/phase2-mlx-eval.md` の実測では、2972 MB は測定 1（Qwen3 1.7B、読込後 923 MB）の値で、測定 2（Qwen2.5 1.5B、読込後 831 MB）の利用可能メモリは 2066 MB である。したがって同じ欄の「4B 4bit でも 1 GB 強の余裕がある」は、この数値からは導けない。訂正後の値で単純に見積もると（筆者の見積もりで未測定）、1.5B を解放した状態の空きは約 2.9 GB（2066 + 831）で、4B 4bit の見込み 2.5〜2.6 GB を引いた余裕は 0.3〜0.4 GB 程度になる。候補として残す決定は変えないが、4B が iPhone 15 に載るかどうかは測定 3 まで未確認として扱う。
 
 ## ADR-043 日誌検索の再現率を上げる（漢字の部分語、Apple の予算、search_notes の OR フォールバック）
 - 背景（ユーザー報告 2026-10-28）: Apple Intelligence に日誌のことを聞くと、すぐ「該当する日誌がありません」と返る。原因はモデルではなくハーネス側: `SearchTerms.keywords` の語がそのまま本文に無いと `JournalLookup.find` が空になり、直近日誌 5 件×150 字しか渡らない上に、system prompt が「無ければ見つからないと答える」と命じていた。当たっても Apple の予算 800 字では 2 件しか入らない。`search_notes` は全語 AND なので小型モデルの検索語（「ホテル 名前」）も 0 件になる。
@@ -444,3 +452,16 @@
 - 検証: App `PlamoModelStoreTests` に `prepareForDownload` の 3 件（完全な既存ファイルの保持と残骸 GGUF の削除・不完全ファイルの削除・未着地では未完了）、App `MLXModelStoreTests` に `selectFiles` の 2 件（対象拡張子のみ保持・ネストしたパスへの fnmatch 到達）を追加。ネットワーク自体は従来どおり実機検証（チェックリストの PLaMo / MLX のダウンロード項目）。
 - 影響要件: FR-15、モデル管理全般
 - 状態: 採用（実機での再ダウンロード確認待ち）
+
+## ADR-053 要求の正を要件基準文書へ入れ、金庫を機構化する
+- 背景: `docs/gap-analysis-2026-11-16.md` の分析で、最大の構造原因は「要求の正が開発者の読む文書に入っていない」ことだった。存在理由の再定義（2026-11-03、金庫）と舵（文字起こしへの集中）、エージェントの位置づけ（金庫の中で働く執事）、測定の制約（実機確認は所有者 1 人に直列で依存し、宿題を際限なく積まない）は、要件基準文書 `AGENT_REQUIREMENTS.md` と `CLAUDE.md` のどこにも書かれていなかった。あわせて金庫は「経路ごとの約束」で守られており、ADR-026（ログに本文を入れない）と実装の食い違い、本体データ（SwiftData ストア）だけバックアップ除外が無いこと、アプリ全体の通信を検査する仕組みが無いことが判明した。
+- 決定:
+  - `AGENT_REQUIREMENTS.md` を版 1.1 とし、第0章に存在理由（金庫）、改善の舵（文字起こし）、エージェントの位置づけ、測定の制約を追記した。第0章と第1章以降が食い違うときは第0章を優先する。対象 OS（iOS 27）とアプリ名（ポケット執事）も現行に合わせ、`CLAUDE.md` のゴールも同じ内容に書き換えた。
+  - 文書のズレを注記で直した: ADR-001・004・006・007 の状態欄「CI 未実行」は起票時点の記述であること、ADR-011 は所有者が Claude 経路を使わない間は暫定のまま凍結すること、ADR-018 は `AGENTS.md` の現行運用（RED を main に push しない）に置き換えられたこと、ADR-042 のメモリ数値（2972 MB は測定 1 の値、測定 2 は 2066 MB）を訂正したこと。
+  - 測定ログから本文を外した（推奨 2(a)）: 音声 30 秒テストの確定テキスト全文、要約テストの本文、二言語ゲートの発話テキストをログに書くのをやめ、字数・件数だけにした（`MeasurementLogLines` に整形を分離）。以前のビルドが書いた本文行は、読み込み時に取り除く。ADR-026 の文言に実装を合わせた。
+  - SwiftData ストアにバックアップ除外とファイル保護を付けた（推奨 2(b)）: `StoreFileGuard` がストア本体と SQLite の -wal / -shm に `isExcludedFromBackup` と `completeUnlessOpen`（ロック中の会議録音でも開いているハンドルで書き続けられるため `complete` ではない）を起動ごとに付ける。
+  - 通信検査テストを足した（推奨 2(c)）: `NetworkIsolationTests` が `URLProtocol` の差し替えで `URLSession.shared` 経由のリクエストを捕捉し、端末内モデル選択時に記録・会議・チャットの経路から通信要求が出ないことを確かめる。到達範囲は `URLSession.shared` を使う自前コード（`ClaudeAdapter`、`MeasurementUploader`）まで。独自セッション（swift-huggingface の `HubClient`）、URLSession より下のソケット（llama.cpp、MLX）、Apple フレームワークの別プロセスでの動作は、このテストでは未確認のままである。
+  - Claude を選んだときに日誌・会議を送る経路（ADR-040）の扱いは、推奨 2(d) の案 A/B/C として所有者に諮り、2026-11-17 に案 C（現状維持）が決まった。Claude を選んだときは日誌・会議の文字起こしを送り（ADR-040 のまま、チャット画面の送信内容の注意書きも現行どおり）、金庫の説明は「既定では外へ送らない」に留める（要件文書 第0章 0.1 の決定事項）。
+- 検証: App テストに `MeasurementLogLinesTests` 6 件（本文がログに残らず字数・件数が記録されること、旧形式の本文行が読み込み時に除かれること）、`StoreFileGuardTests` 5 件（対象ファイルの列挙と除外・保護属性）、`NetworkIsolationTests` 3 件（端末内経路で捕捉リクエスト 0 件）を追加。CI の結果は PR で確認する。
+- 影響要件: AGENT_REQUIREMENTS 版 1.1 第0章、FR 全般（金庫の不変条件）
+- 状態: 採用（CI 検証待ち）
